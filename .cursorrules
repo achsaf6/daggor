@@ -1,1 +1,2 @@
+This webapp does not use Google Cloud Run
 This webapp is deployed on vercel with a url that is saved as an env variable DAGOR_URL

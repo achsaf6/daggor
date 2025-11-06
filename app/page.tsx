@@ -116,7 +116,19 @@ export default function Home() {
 
   useEffect(() => {
     // Connect to WebSocket server
-    const socket = io(process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3000", {
+    // In production, use the same origin if NEXT_PUBLIC_WS_URL is not set
+    const getWebSocketUrl = () => {
+      if (process.env.NEXT_PUBLIC_WS_URL) {
+        return process.env.NEXT_PUBLIC_WS_URL;
+      }
+      if (typeof window !== 'undefined') {
+        // Use current origin in production (browser)
+        return window.location.origin;
+      }
+      return "http://localhost:3000";
+    };
+
+    const socket = io(getWebSocketUrl(), {
       transports: ["websocket", "polling"],
     });
 
