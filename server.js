@@ -2,8 +2,6 @@ require('dotenv').config();
 
 const { createServer } = require('http');
 const { Server } = require('socket.io');
-const { createAdapter } = require('@socket.io/redis-adapter');
-const { createClient } = require('ioredis');
 const next = require('next');
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -13,8 +11,10 @@ const port = parseInt(process.env.PORT || '3000', 10);
 const app = next({ dev, hostname, port });
 const handler = app.getRequestHandler();
 
-// Store connected users (in-memory cache, synced with Redis)
+// Store connected users (in-memory)
 const users = new Map();
+// Store disconnected users temporarily to restore on reconnect (in-memory)
+const disconnectedUsers = new Map();
 
 // Generate random color
 function getRandomColor() {
@@ -33,137 +33,96 @@ function getRandomColor() {
   return colors[Math.floor(Math.random() * colors.length)];
 }
 
-app.prepare().then(async () => {
-  const httpServer = createServer(handler);
-  
-  // Configure Socket.IO for production
-  const ioConfig = {
-    cors: {
-      origin: '*',
-      methods: ['GET', 'POST'],
-    },
-    transports: ['websocket', 'polling'],
-  };
-
-  // Use Redis adapter if REDIS_URL is provided (for multi-instance scaling)
-  if (process.env.REDIS_URL) {
-    const pubClient = createClient(process.env.REDIS_URL);
-    const subClient = pubClient.duplicate();
-
-    // Wait for both clients to be ready
-    await Promise.all([
-      new Promise((resolve) => {
-        if (pubClient.status === 'ready') {
-          resolve();
-        } else {
-          pubClient.once('ready', resolve);
-        }
-      }),
-      new Promise((resolve) => {
-        if (subClient.status === 'ready') {
-          resolve();
-        } else {
-          subClient.once('ready', resolve);
-        }
-      }),
-    ]);
-
-    ioConfig.adapter = createAdapter(pubClient, subClient);
-    console.log('Using Redis adapter for Socket.IO');
-  }
-
-  const io = new Server(httpServer, ioConfig);
-
-  // Redis client for storing user state (if available)
-  let redisClient = null;
-  if (process.env.REDIS_URL) {
-    redisClient = createClient(process.env.REDIS_URL);
-    // Wait for Redis client to be ready
-    await new Promise((resolve) => {
-      if (redisClient.status === 'ready') {
-        resolve();
-      } else {
-        redisClient.once('ready', resolve);
-      }
-    });
-    console.log('Connected to Redis for user state');
-
-    // Load existing users from Redis on startup
-    try {
-      const userKeys = await redisClient.keys('user:*');
-      for (const key of userKeys) {
-        const userData = await redisClient.get(key);
-        if (userData) {
-          const user = JSON.parse(userData);
-          users.set(user.id, user);
-        }
-      }
-      console.log(`Loaded ${users.size} users from Redis`);
-    } catch (err) {
-      console.error('Error loading users from Redis:', err);
-    }
-  }
-
-  // Helper function to save user to Redis
-  const saveUserToRedis = async (userId, userData) => {
-    if (redisClient) {
-      try {
-        await redisClient.set(`user:${userId}`, JSON.stringify(userData));
-      } catch (err) {
-        console.error('Error saving user to Redis:', err);
-      }
-    }
-  };
-
-  // Helper function to delete user from Redis
-  const deleteUserFromRedis = async (userId) => {
-    if (redisClient) {
-      try {
-        await redisClient.del(`user:${userId}`);
-      } catch (err) {
-        console.error('Error deleting user from Redis:', err);
-      }
-    }
-  };
+app.prepare().then(() => {
 
   io.on('connection', (socket) => {
-    // Generate unique user ID and color
     const userId = socket.id;
-    const color = getRandomColor();
-    const initialPosition = { x: 50, y: 50 };
+    let userData = null;
+    let identificationReceived = false;
 
-    const userData = {
-      id: userId,
-      color,
-      position: initialPosition,
+    // Function to initialize user
+    const initializeUser = (data) => {
+      if (identificationReceived) return; // Prevent double initialization
+      identificationReceived = true;
+
+      const persistentUserId = data?.persistentUserId || null;
+      let restoredUserData = null;
+
+      // Check if this user was previously disconnected (in-memory only)
+      if (persistentUserId) {
+        const disconnectedUser = disconnectedUsers.get(persistentUserId);
+        if (disconnectedUser) {
+          restoredUserData = disconnectedUser;
+          disconnectedUsers.delete(persistentUserId);
+        }
+      }
+
+      // Use restored data or create new user
+      const color = restoredUserData?.color || getRandomColor();
+      const position = restoredUserData?.position || { x: 50, y: 50 };
+
+      userData = {
+        id: userId,
+        persistentUserId: persistentUserId || userId, // Use persistent ID if available
+        color,
+        position,
+        isDisplay: data?.isDisplay || false, // Track if this is a display mode user
+      };
+
+      users.set(userId, userData);
+
+      // Send current user their info and all existing users (including disconnected)
+      socket.emit('user-connected', {
+        userId,
+        persistentUserId: userData.persistentUserId,
+        color,
+        position,
+      });
+
+      // Send all active users
+      socket.emit('all-users', Array.from(users.values()));
+
+      // Send disconnected users (for display mode users to track)
+      const disconnectedUsersList = Array.from(disconnectedUsers.values());
+      if (disconnectedUsersList.length > 0) {
+        socket.emit('disconnected-users', disconnectedUsersList);
+      }
+
+      // Broadcast new user to all other clients (only if not a restoration)
+      if (!restoredUserData) {
+        socket.broadcast.emit('user-joined', {
+          userId,
+          persistentUserId: userData.persistentUserId,
+          color,
+          position,
+        });
+      } else {
+        // User reconnected - broadcast reconnection
+        socket.broadcast.emit('user-reconnected', {
+          userId,
+          persistentUserId: userData.persistentUserId,
+          color,
+          position,
+        });
+      }
     };
 
-    users.set(userId, userData);
-    saveUserToRedis(userId, userData);
+    // Listen for user identification
+    socket.once('user-identify', initializeUser);
 
-    // Send current user their info and all existing users
-    socket.emit('user-connected', {
-      userId,
-      color,
-      position: initialPosition,
-    });
-
-    socket.emit('all-users', Array.from(users.values()));
-
-    // Broadcast new user to all other clients
-    socket.broadcast.emit('user-joined', {
-      userId,
-      color,
-      position: initialPosition,
-    });
+    // If client doesn't send identification within 1 second, proceed with new user
+    setTimeout(() => {
+      if (!identificationReceived) {
+        initializeUser({});
+      }
+    }, 1000);
 
     // Handle position updates
     socket.on('position-update', (position) => {
       const user = users.get(userId);
       if (user) {
         user.position = position;
-        saveUserToRedis(userId, user);
-        // Broadcast to all other clients (Redis adapter handles cross-instance broadcasting)
+        // Broadcast to all other clients
         socket.broadcast.emit('user-moved', {
           userId,
           position,
@@ -173,10 +132,27 @@ app.prepare().then(async () => {
 
     // Handle disconnect
     socket.on('disconnect', () => {
-      users.delete(userId);
-      deleteUserFromRedis(userId);
-      // Broadcast to all other clients (Redis adapter handles cross-instance broadcasting)
-      socket.broadcast.emit('user-left', { userId });
+      const user = users.get(userId);
+      if (user) {
+        // Don't delete - move to disconnected users (in-memory)
+        const persistentId = user.persistentUserId || userId;
+        const disconnectedUserData = {
+          id: persistentId, // Use persistent ID for disconnected users
+          persistentUserId: persistentId,
+          color: user.color,
+          position: user.position,
+          disconnectedAt: Date.now(),
+        };
+
+        disconnectedUsers.set(persistentId, disconnectedUserData);
+        users.delete(userId);
+
+        // Broadcast to all other clients
+        socket.broadcast.emit('user-disconnected', {
+          userId,
+          persistentUserId: persistentId,
+        });
+      }
     });
   });
 
@@ -189,4 +165,5 @@ app.prepare().then(async () => {
       console.log(`> Ready on http://${hostname}:${port}`);
     });
 });
+
 

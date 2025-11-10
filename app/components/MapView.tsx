@@ -17,10 +17,10 @@ import { MapSettings } from "./MapSettings";
 
 export const MapView = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { myColor, myPosition, otherUsers, updateMyPosition } = useSocket();
+  const { isMobile, isDisplay, isMounted } = useViewMode();
+  const { myColor, myPosition, otherUsers, updateMyPosition } = useSocket(isDisplay);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const { gridData } = useGridlines();
-  const { isMobile, isDisplay, isMounted } = useViewMode();
   const { settings, setGridScale, setGridOffset } = useSettings();
 
   // Extract world map dimensions from gridData for coordinate mapping

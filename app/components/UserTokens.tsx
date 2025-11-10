@@ -13,6 +13,7 @@ interface UserTokensProps {
     imageHeight: number;
   };
   gridScale?: number;
+  isMounted?: boolean;
 }
 
 export const UserTokens = ({ 
@@ -22,6 +23,7 @@ export const UserTokens = ({
   worldMapHeight = 0,
   gridData,
   gridScale = 1.0,
+  isMounted,
 }: UserTokensProps) => {
   if (!imageBounds) return null;
 
@@ -37,6 +39,7 @@ export const UserTokens = ({
           worldMapHeight={worldMapHeight}
           gridData={gridData}
           gridScale={gridScale}
+          isMounted={isMounted}
         />
       ))}
     </>

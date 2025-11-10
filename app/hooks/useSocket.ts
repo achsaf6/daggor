@@ -11,14 +11,31 @@ interface UseSocketReturn {
   updateMyPosition: (position: Position) => void;
 }
 
-export const useSocket = (): UseSocketReturn => {
+export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [myColor, setMyColor] = useState<string>("#ef4444");
   const [myPosition, setMyPosition] = useState<Position>({ x: 50, y: 50 });
   const [otherUsers, setOtherUsers] = useState<Map<string, User>>(new Map());
   const socketRef = useRef<Socket | null>(null);
+  const persistentUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Get or create persistent user ID from localStorage
+    const getPersistentUserId = (): string => {
+      if (typeof window === "undefined") {
+        return `temp-${Date.now()}-${Math.random()}`;
+      }
+      const stored = localStorage.getItem("persistentUserId");
+      if (stored) {
+        return stored;
+      }
+      const newId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+      localStorage.setItem("persistentUserId", newId);
+      return newId;
+    };
+
+    persistentUserIdRef.current = getPersistentUserId();
+
     // Connect to WebSocket server
     // In production, use the same origin if NEXT_PUBLIC_WS_URL is not set
     const getWebSocketUrl = () => {
@@ -41,6 +58,40 @@ export const useSocket = (): UseSocketReturn => {
     // Handle connection
     socket.on("connect", () => {
       console.log("Connected to server");
+      // Send user identification immediately after connection
+      socket.emit("user-identify", {
+        persistentUserId: persistentUserIdRef.current,
+        isDisplay: isDisplay,
+      });
+    });
+
+    // Handle disconnection
+    socket.on("disconnect", (reason) => {
+      console.log("Disconnected from server:", reason);
+      if (reason === "io server disconnect") {
+        // Server initiated disconnect, client needs to manually reconnect
+        socket.connect();
+      }
+    });
+
+    // Handle reconnection attempts
+    socket.on("reconnect_attempt", (attemptNumber) => {
+      console.log(`Reconnection attempt ${attemptNumber}`);
+    });
+
+    // Handle successful reconnection
+    socket.on("reconnect", (attemptNumber) => {
+      console.log(`Reconnected to server after ${attemptNumber} attempts`);
+    });
+
+    // Handle reconnection errors
+    socket.on("reconnect_error", (error) => {
+      console.error("Reconnection error:", error);
+    });
+
+    // Handle failed reconnection (all attempts exhausted)
+    socket.on("reconnect_failed", () => {
+      console.error("Failed to reconnect to server after all attempts");
     });
 
     // Receive user info (my own ID and color)
@@ -103,13 +154,53 @@ export const useSocket = (): UseSocketReturn => {
       }
     );
 
-    // Handle user leaving
+    // Handle user leaving (deprecated - now using user-disconnected)
     socket.on("user-left", (data: { userId: string }) => {
       setOtherUsers((prev) => {
         const updated = new Map(prev);
         updated.delete(data.userId);
         return updated;
       });
+    });
+
+    // Handle user disconnecting (moved to disconnected state)
+    socket.on("user-disconnected", (data: { userId: string; persistentUserId: string }) => {
+      // Remove from active users, but keep in disconnected state (server handles this)
+      setOtherUsers((prev) => {
+        const updated = new Map(prev);
+        updated.delete(data.userId);
+        return updated;
+      });
+    });
+
+    // Handle user reconnecting
+    socket.on(
+      "user-reconnected",
+      (data: {
+        userId: string;
+        persistentUserId: string;
+        color: string;
+        position: { x: number; y: number };
+      }) => {
+        setOtherUsers((prev) => {
+          const updated = new Map(prev);
+          updated.set(data.userId, {
+            id: data.userId,
+            color: data.color,
+            position: data.position,
+          });
+          return updated;
+        });
+      }
+    );
+
+    // Handle disconnected users list (for display mode users to track)
+    socket.on("disconnected-users", (disconnectedUsers: User[]) => {
+      // Display mode users can track disconnected users if needed
+      // For now, we'll just log them
+      if (isDisplay) {
+        console.log("Disconnected users:", disconnectedUsers);
+      }
     });
 
     // Cleanup on unmount
