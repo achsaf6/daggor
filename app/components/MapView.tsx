@@ -11,14 +11,14 @@ import { usePan } from "../hooks/usePan";
 import { useSettings } from "../hooks/useSettings";
 import { MapImage } from "./MapImage";
 import { UserToken } from "./UserToken";
-import { UserTokens } from "./UserTokens";
+import { TokenManager } from "./TokenManager";
 import { GridLines } from "./GridLines";
 import { MapSettings } from "./MapSettings";
 
 export const MapView = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { isMobile, isDisplay, isMounted } = useViewMode();
-  const { myColor, myPosition, otherUsers, updateMyPosition } = useSocket(isDisplay);
+  const { myColor, myPosition, otherUsers, disconnectedUsers, updateMyPosition, removeToken } = useSocket(isDisplay);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const { gridData } = useGridlines();
   const { settings, setGridScale, setGridOffset } = useSettings();
@@ -348,14 +348,17 @@ export const MapView = () => {
             />
           </div>
         )}
-        <UserTokens 
-          users={otherUsers} 
+        <TokenManager
+          activeUsers={otherUsers}
+          disconnectedUsers={disconnectedUsers}
           imageBounds={imageBounds}
           worldMapWidth={worldMapWidth}
           worldMapHeight={worldMapHeight}
           gridData={gridData}
           gridScale={settings.gridScale}
           isMounted={isMounted}
+          isDisplay={isDisplay}
+          onRemoveToken={removeToken}
         />
       </div>
     </div>

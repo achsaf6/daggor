@@ -151,11 +151,38 @@ app.prepare().then(() => {
         disconnectedUsers.set(persistentId, disconnectedUserData);
         users.delete(userId);
 
-        // Broadcast to all other clients
+        // Broadcast to all other clients with color and position
         socket.broadcast.emit('user-disconnected', {
           userId,
           persistentUserId: persistentId,
+          color: user.color,
+          position: user.position,
         });
+      }
+    });
+
+    // Handle token removal (only from display mode users)
+    socket.on('remove-token', (data) => {
+      const user = users.get(userId);
+      if (user && user.isDisplay && data.persistentUserId) {
+        // Remove from disconnected users
+        if (disconnectedUsers.has(data.persistentUserId)) {
+          disconnectedUsers.delete(data.persistentUserId);
+        }
+        // Also check active users (in case they're still connected)
+        for (const [activeUserId, activeUser] of users.entries()) {
+          if (activeUser.persistentUserId === data.persistentUserId) {
+            users.delete(activeUserId);
+            // Notify the user being removed if they're still connected
+            const targetSocket = io.sockets.sockets.get(activeUserId);
+            if (targetSocket) {
+              targetSocket.emit('token-removed', { persistentUserId: data.persistentUserId });
+            }
+            break;
+          }
+        }
+        // Broadcast removal to all clients
+        io.emit('token-removed', { persistentUserId: data.persistentUserId });
       }
     });
   });

@@ -7,8 +7,10 @@ interface UseSocketReturn {
   myColor: string;
   myPosition: Position;
   otherUsers: Map<string, User>;
+  disconnectedUsers: Map<string, User>;
   socket: Socket | null;
   updateMyPosition: (position: Position) => void;
+  removeToken: (persistentUserId: string) => void;
 }
 
 export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
@@ -16,6 +18,7 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
   const [myColor, setMyColor] = useState<string>("#ef4444");
   const [myPosition, setMyPosition] = useState<Position>({ x: 50, y: 50 });
   const [otherUsers, setOtherUsers] = useState<Map<string, User>>(new Map());
+  const [disconnectedUsers, setDisconnectedUsers] = useState<Map<string, User>>(new Map());
   const socketRef = useRef<Socket | null>(null);
   const persistentUserIdRef = useRef<string | null>(null);
 
@@ -109,12 +112,21 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     );
 
     // Receive all existing users
-    socket.on("all-users", (users: User[]) => {
+    socket.on("all-users", (users: any[]) => {
       const usersMap = new Map<string, User>();
       const currentMyUserId = socket.id;
       users.forEach((user) => {
         if (user.id !== currentMyUserId) {
-          usersMap.set(user.id, user);
+          // Preserve persistentUserId if it exists
+          const userData: User & { persistentUserId?: string } = {
+            id: user.id,
+            color: user.color,
+            position: user.position,
+          };
+          if (user.persistentUserId) {
+            (userData as any).persistentUserId = user.persistentUserId;
+          }
+          usersMap.set(user.id, userData);
         }
       });
       setOtherUsers(usersMap);
@@ -123,14 +135,18 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     // Handle new user joining
     socket.on(
       "user-joined",
-      (data: { userId: string; color: string; position: { x: number; y: number } }) => {
+      (data: { userId: string; persistentUserId?: string; color: string; position: { x: number; y: number } }) => {
         setOtherUsers((prev) => {
           const updated = new Map(prev);
-          updated.set(data.userId, {
+          const userData: User & { persistentUserId?: string } = {
             id: data.userId,
             color: data.color,
             position: data.position,
-          });
+          };
+          if (data.persistentUserId) {
+            (userData as any).persistentUserId = data.persistentUserId;
+          }
+          updated.set(data.userId, userData);
           return updated;
         });
       }
@@ -164,10 +180,23 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     });
 
     // Handle user disconnecting (moved to disconnected state)
-    socket.on("user-disconnected", (data: { userId: string; persistentUserId: string }) => {
-      // Remove from active users, but keep in disconnected state (server handles this)
+    socket.on("user-disconnected", (data: { userId: string; persistentUserId: string; color: string; position: { x: number; y: number } }) => {
+      // Remove from active users
       setOtherUsers((prev) => {
         const updated = new Map(prev);
+        const user = updated.get(data.userId);
+        if (user) {
+          // Move to disconnected users with persistent ID as key
+          setDisconnectedUsers((prevDisconnected) => {
+            const updatedDisconnected = new Map(prevDisconnected);
+            updatedDisconnected.set(data.persistentUserId, {
+              id: data.persistentUserId,
+              color: user.color,
+              position: user.position,
+            });
+            return updatedDisconnected;
+          });
+        }
         updated.delete(data.userId);
         return updated;
       });
@@ -182,25 +211,56 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
         color: string;
         position: { x: number; y: number };
       }) => {
+        // Remove from disconnected users
+        setDisconnectedUsers((prev) => {
+          const updated = new Map(prev);
+          updated.delete(data.persistentUserId);
+          return updated;
+        });
+        // Add back to active users
         setOtherUsers((prev) => {
           const updated = new Map(prev);
-          updated.set(data.userId, {
+          const userData: User & { persistentUserId?: string } = {
             id: data.userId,
             color: data.color,
             position: data.position,
-          });
+          };
+          (userData as any).persistentUserId = data.persistentUserId;
+          updated.set(data.userId, userData);
           return updated;
         });
       }
     );
 
+    // Handle token removal
+    socket.on("token-removed", (data: { persistentUserId: string }) => {
+      setDisconnectedUsers((prev) => {
+        const updated = new Map(prev);
+        updated.delete(data.persistentUserId);
+        return updated;
+      });
+      // Also check active users (in case they're still connected)
+      setOtherUsers((prev) => {
+        const updated = new Map(prev);
+        // Find and remove by persistentUserId if it matches
+        for (const [userId, user] of updated.entries()) {
+          if ((user as any).persistentUserId === data.persistentUserId) {
+            updated.delete(userId);
+            break;
+          }
+        }
+        return updated;
+      });
+    });
+
     // Handle disconnected users list (for display mode users to track)
-    socket.on("disconnected-users", (disconnectedUsers: User[]) => {
-      // Display mode users can track disconnected users if needed
-      // For now, we'll just log them
-      if (isDisplay) {
-        console.log("Disconnected users:", disconnectedUsers);
-      }
+    socket.on("disconnected-users", (disconnectedUsersList: User[]) => {
+      // Store disconnected users so their tokens remain visible
+      const disconnectedMap = new Map<string, User>();
+      disconnectedUsersList.forEach((user) => {
+        disconnectedMap.set(user.id, user);
+      });
+      setDisconnectedUsers(disconnectedMap);
     });
 
     // Cleanup on unmount
@@ -216,13 +276,21 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     }
   };
 
+  const removeToken = (persistentUserId: string) => {
+    if (socketRef.current && isDisplay) {
+      socketRef.current.emit("remove-token", { persistentUserId });
+    }
+  };
+
   return {
     myUserId,
     myColor,
     myPosition,
     otherUsers,
+    disconnectedUsers,
     socket: socketRef.current,
     updateMyPosition,
+    removeToken,
   };
 };
 

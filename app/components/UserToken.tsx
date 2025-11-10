@@ -10,6 +10,8 @@ interface UserTokenProps {
   isInteractive?: boolean;
   onMouseDown?: (e: React.MouseEvent) => void;
   onTouchStart?: (e: React.TouchEvent) => void;
+  onClick?: (e: React.MouseEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   gridData?: {
     verticalLines: number[];
     horizontalLines: number[];
@@ -19,6 +21,8 @@ interface UserTokenProps {
   gridScale?: number;
   zIndex?: number;
   isMounted?: boolean;
+  opacity?: number;
+  title?: string;
 }
 
 export const UserToken = ({
@@ -30,10 +34,14 @@ export const UserToken = ({
   isInteractive = false,
   onMouseDown,
   onTouchStart,
+  onClick,
+  onContextMenu,
   gridData,
   gridScale = 1.0,
   zIndex,
   isMounted,
+  opacity,
+  title,
 }: UserTokenProps) => {
   return (
     <Token
@@ -45,10 +53,14 @@ export const UserToken = ({
       isInteractive={isInteractive}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
       gridData={gridData}
       gridScale={gridScale}
       zIndex={zIndex}
       isMounted={isMounted}
+      opacity={opacity}
+      title={title}
     />
   );
 };

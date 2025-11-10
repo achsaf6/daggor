@@ -15,6 +15,8 @@ interface TokenProps {
   isInteractive?: boolean;
   onMouseDown?: (e: React.MouseEvent) => void;
   onTouchStart?: (e: React.TouchEvent) => void;
+  onClick?: (e: React.MouseEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   gridData?: {
     verticalLines: number[];
     horizontalLines: number[];
@@ -24,6 +26,8 @@ interface TokenProps {
   gridScale?: number;
   zIndex?: number;
   isMounted?: boolean;
+  opacity?: number;
+  title?: string;
 }
 
 export const Token = ({
@@ -35,10 +39,14 @@ export const Token = ({
   isInteractive = false,
   onMouseDown,
   onTouchStart,
+  onClick,
+  onContextMenu,
   gridData,
   gridScale = 1.0,
   zIndex = 10,
   isMounted = true,
+  opacity = 1.0,
+  title,
 }: TokenProps) => {
   const coordinateMapper = useCoordinateMapper(
     imageBounds,
@@ -131,6 +139,7 @@ export const Token = ({
       className={`absolute rounded-full border-2 border-white shadow-lg ${zIndexClass} ${
         isInteractive ? "cursor-move" : ""
       }`}
+      title={title}
       style={{
         left: `${viewportPos.x}%`,
         top: `${viewportPos.y}%`,
@@ -139,9 +148,12 @@ export const Token = ({
         transform: "translate(-50%, -50%)",
         backgroundColor: color,
         touchAction: isInteractive ? "none" : "auto",
+        opacity: opacity,
       }}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
     />
   );
 };
