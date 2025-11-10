@@ -1,16 +1,15 @@
 "use client";
 
-import { useRef, useMemo, useCallback, useEffect } from "react";
+import React, { useRef, useMemo, useCallback, useEffect, useState } from "react";
 import { useSocket } from "../hooks/useSocket";
 import { useImageBounds } from "../hooks/useImageBounds";
-import { usePosition } from "../hooks/usePosition";
 import { useGridlines } from "../hooks/useGridlines";
 import { useViewMode } from "../hooks/useViewMode";
 import { useCoordinateMapper } from "../hooks/useCoordinateMapper";
 import { usePan } from "../hooks/usePan";
 import { useSettings } from "../hooks/useSettings";
 import { MapImage } from "./MapImage";
-import { UserToken } from "./UserToken";
+import { DraggableToken } from "./DraggableToken";
 import { TokenManager } from "./TokenManager";
 import { GridLines } from "./GridLines";
 import { MapSettings } from "./MapSettings";
@@ -18,7 +17,7 @@ import { MapSettings } from "./MapSettings";
 export const MapView = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { isMobile, isDisplay, isMounted } = useViewMode();
-  const { myColor, myPosition, otherUsers, disconnectedUsers, updateMyPosition, removeToken } = useSocket(isDisplay);
+  const { myUserId, myColor, myPosition, otherUsers, disconnectedUsers, updateTokenPosition, removeToken } = useSocket(isDisplay);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const { gridData } = useGridlines();
   const { settings, setGridScale, setGridOffset } = useSettings();
@@ -143,35 +142,16 @@ export const MapView = () => {
     };
   }, [isMobile, isMounted, zoomScale, pan.panState, initialCenterTransform]);
 
-  const {
-    isDragging: isTokenDragging,
-    handleMouseDown: handleTokenMouseDown,
-    handleTouchStart: handleTokenTouchStart,
-    handleMouseMove: handleTokenMouseMove,
-    handleTouchMove: handleTokenTouchMove,
-    handleMouseUp: handleTokenMouseUp,
-    handleTouchEnd: handleTokenTouchEnd,
-  } = usePosition(
-    imageBounds, 
-    updateMyPosition, 
-    worldMapWidth, 
-    worldMapHeight,
-    mobileTransform,
-    {
-      gridData,
-      gridScale: settings.gridScale,
-      gridOffsetX: settings.gridOffsetX,
-      gridOffsetY: settings.gridOffsetY,
-    }
-  );
+  // Track which token is being dragged (if any)
+  const [draggingTokenId, setDraggingTokenId] = useState<string | null>(null);
 
-  // Handle panning on container (not user token)
+  // Handle panning on container (not tokens)
   const handleContainerMouseDown = useCallback((e: React.MouseEvent) => {
     if (!isMobile) return;
-    // Only start pan if not clicking on user token
+    // Only start pan if not clicking on any token
     const target = e.target as HTMLElement;
-    if (target.closest('[data-user-token]')) {
-      return; // Let user token handle it
+    if (target.closest('[data-token]')) {
+      return; // Let token handle it
     }
     e.stopPropagation(); // Prevent token handlers from firing
     pan.startPan(e.clientX, e.clientY);
@@ -181,7 +161,7 @@ export const MapView = () => {
   const handleContainerTouchStart = useCallback((e: React.TouchEvent) => {
     if (!isMobile) return;
     const target = e.target as HTMLElement;
-    if (target.closest('[data-user-token]')) {
+    if (target.closest('[data-token]')) {
       return;
     }
     e.stopPropagation(); // Prevent token handlers from firing
@@ -195,23 +175,23 @@ export const MapView = () => {
   const handleContainerMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isMobile) return;
     // Only pan if we're actively panning and not dragging token
-    if (pan.panState.isPanning && !isTokenDragging) {
+    if (pan.panState.isPanning && !draggingTokenId) {
       pan.updatePan(e.clientX, e.clientY);
       pan.trackInteraction();
     }
-  }, [isMobile, pan, isTokenDragging]);
+  }, [isMobile, pan, draggingTokenId]);
 
   const handleContainerTouchMove = useCallback((e: React.TouchEvent) => {
     if (!isMobile) return;
     // Only pan if we're actively panning and not dragging token
-    if (pan.panState.isPanning && !isTokenDragging) {
+    if (pan.panState.isPanning && !draggingTokenId) {
       const touch = e.touches[0];
       if (touch) {
         pan.updatePan(touch.clientX, touch.clientY);
         pan.trackInteraction();
       }
     }
-  }, [isMobile, pan, isTokenDragging]);
+  }, [isMobile, pan, draggingTokenId]);
 
   const handleContainerMouseUp = useCallback(() => {
     if (!isMobile) return;
@@ -248,51 +228,30 @@ export const MapView = () => {
       className="fixed inset-0 m-0 p-0 overflow-hidden"
       onMouseDown={isMobile ? handleContainerMouseDown : undefined}
       onMouseMove={(e) => {
-        // In mobile mode, prioritize token dragging if dragging, otherwise allow panning
-        if (isMobile) {
-          if (isTokenDragging) {
-            handleTokenMouseMove(e);
-          } else if (pan.panState.isPanning) {
-            handleContainerMouseMove(e);
-          }
-        } else {
-          handleTokenMouseMove(e);
+        // In mobile mode, only handle panning if not dragging a token
+        if (isMobile && pan.panState.isPanning && !draggingTokenId) {
+          handleContainerMouseMove(e);
         }
       }}
       onMouseUp={() => {
         if (isMobile) {
           handleContainerMouseUp();
-          handleTokenMouseUp();
-        } else {
-          handleTokenMouseUp();
         }
       }}
       onMouseLeave={() => {
         if (isMobile) {
           handleContainerMouseUp();
-          handleTokenMouseUp();
-        } else {
-          handleTokenMouseUp();
         }
       }}
       onTouchStart={isMobile ? handleContainerTouchStart : undefined}
       onTouchMove={(e) => {
-        if (isMobile) {
-          if (isTokenDragging) {
-            handleTokenTouchMove(e);
-          } else if (pan.panState.isPanning) {
-            handleContainerTouchMove(e);
-          }
-        } else {
-          handleTokenTouchMove(e);
+        if (isMobile && pan.panState.isPanning && !draggingTokenId) {
+          handleContainerTouchMove(e);
         }
       }}
       onTouchEnd={() => {
         if (isMobile) {
           handleContainerTouchEnd();
-          handleTokenTouchEnd();
-        } else {
-          handleTokenTouchEnd();
         }
       }}
       onClick={(e) => {
@@ -330,21 +289,23 @@ export const MapView = () => {
             gridOffsetY={settings.gridOffsetY}
           />
         )}
-        {imageBounds && (
-          <div data-user-token>
-            <UserToken
+        {imageBounds && myUserId && (
+          <div data-token>
+            <DraggableToken
+              tokenId={myUserId}
               position={myPosition}
               color={myColor}
               imageBounds={imageBounds}
               worldMapWidth={worldMapWidth}
               worldMapHeight={worldMapHeight}
-              isInteractive={true}
-              onMouseDown={handleTokenMouseDown}
-              onTouchStart={handleTokenTouchStart}
               gridData={gridData}
               gridScale={settings.gridScale}
-              zIndex={20}
+              gridOffsetX={settings.gridOffsetX}
+              gridOffsetY={settings.gridOffsetY}
               isMounted={isMounted}
+              onPositionUpdate={updateTokenPosition}
+              transform={mobileTransform}
+              onDragStateChange={setDraggingTokenId}
             />
           </div>
         )}
@@ -356,9 +317,15 @@ export const MapView = () => {
           worldMapHeight={worldMapHeight}
           gridData={gridData}
           gridScale={settings.gridScale}
+          gridOffsetX={settings.gridOffsetX}
+          gridOffsetY={settings.gridOffsetY}
           isMounted={isMounted}
           isDisplay={isDisplay}
+          myUserId={myUserId}
           onRemoveToken={removeToken}
+          onPositionUpdate={updateTokenPosition}
+          transform={mobileTransform}
+          onDragStateChange={setDraggingTokenId}
         />
       </div>
     </div>

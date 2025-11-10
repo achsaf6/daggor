@@ -2,6 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { io, Socket } from "socket.io-client";
 import { User, Position } from "../types";
 
+interface UserWithPersistentId extends User {
+  persistentUserId?: string;
+}
+
 interface UseSocketReturn {
   myUserId: string | null;
   myColor: string;
@@ -10,6 +14,7 @@ interface UseSocketReturn {
   disconnectedUsers: Map<string, User>;
   socket: Socket | null;
   updateMyPosition: (position: Position) => void;
+  updateTokenPosition: (tokenId: string, position: Position) => void;
   removeToken: (persistentUserId: string) => void;
 }
 
@@ -19,8 +24,10 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
   const [myPosition, setMyPosition] = useState<Position>({ x: 50, y: 50 });
   const [otherUsers, setOtherUsers] = useState<Map<string, User>>(new Map());
   const [disconnectedUsers, setDisconnectedUsers] = useState<Map<string, User>>(new Map());
+  const [socket, setSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const persistentUserIdRef = useRef<string | null>(null);
+  const myUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Get or create persistent user ID from localStorage
@@ -52,53 +59,56 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
       return "http://localhost:3000";
     };
 
-    const socket = io(getWebSocketUrl(), {
+    const socketInstance = io(getWebSocketUrl(), {
       transports: ["websocket", "polling"],
     });
 
-    socketRef.current = socket;
+    socketRef.current = socketInstance;
+    // Necessary to make socket available in return value - this is safe as it only runs once on mount
+    // eslint-disable-next-line react-compiler/react-compiler
+    setSocket(socketInstance);
 
     // Handle connection
-    socket.on("connect", () => {
+    socketInstance.on("connect", () => {
       console.log("Connected to server");
       // Send user identification immediately after connection
-      socket.emit("user-identify", {
+      socketInstance.emit("user-identify", {
         persistentUserId: persistentUserIdRef.current,
         isDisplay: isDisplay,
       });
     });
 
     // Handle disconnection
-    socket.on("disconnect", (reason) => {
+    socketInstance.on("disconnect", (reason) => {
       console.log("Disconnected from server:", reason);
       if (reason === "io server disconnect") {
         // Server initiated disconnect, client needs to manually reconnect
-        socket.connect();
+        socketInstance.connect();
       }
     });
 
     // Handle reconnection attempts
-    socket.on("reconnect_attempt", (attemptNumber) => {
+    socketInstance.on("reconnect_attempt", (attemptNumber) => {
       console.log(`Reconnection attempt ${attemptNumber}`);
     });
 
     // Handle successful reconnection
-    socket.on("reconnect", (attemptNumber) => {
+    socketInstance.on("reconnect", (attemptNumber) => {
       console.log(`Reconnected to server after ${attemptNumber} attempts`);
     });
 
     // Handle reconnection errors
-    socket.on("reconnect_error", (error) => {
+    socketInstance.on("reconnect_error", (error) => {
       console.error("Reconnection error:", error);
     });
 
     // Handle failed reconnection (all attempts exhausted)
-    socket.on("reconnect_failed", () => {
+    socketInstance.on("reconnect_failed", () => {
       console.error("Failed to reconnect to server after all attempts");
     });
 
     // Receive user info (my own ID and color)
-    socket.on(
+    socketInstance.on(
       "user-connected",
       (data: {
         userId: string;
@@ -106,25 +116,26 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
         position: { x: number; y: number };
       }) => {
         setMyUserId(data.userId);
+        myUserIdRef.current = data.userId;
         setMyColor(data.color);
         setMyPosition(data.position);
       }
     );
 
     // Receive all existing users
-    socket.on("all-users", (users: any[]) => {
+    socketInstance.on("all-users", (users: UserWithPersistentId[]) => {
       const usersMap = new Map<string, User>();
-      const currentMyUserId = socket.id;
+      const currentMyUserId = socketInstance.id;
       users.forEach((user) => {
         if (user.id !== currentMyUserId) {
           // Preserve persistentUserId if it exists
-          const userData: User & { persistentUserId?: string } = {
+          const userData: UserWithPersistentId = {
             id: user.id,
             color: user.color,
             position: user.position,
           };
           if (user.persistentUserId) {
-            (userData as any).persistentUserId = user.persistentUserId;
+            userData.persistentUserId = user.persistentUserId;
           }
           usersMap.set(user.id, userData);
         }
@@ -133,18 +144,18 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     });
 
     // Handle new user joining
-    socket.on(
+    socketInstance.on(
       "user-joined",
       (data: { userId: string; persistentUserId?: string; color: string; position: { x: number; y: number } }) => {
         setOtherUsers((prev) => {
           const updated = new Map(prev);
-          const userData: User & { persistentUserId?: string } = {
+          const userData: UserWithPersistentId = {
             id: data.userId,
             color: data.color,
             position: data.position,
           };
           if (data.persistentUserId) {
-            (userData as any).persistentUserId = data.persistentUserId;
+            userData.persistentUserId = data.persistentUserId;
           }
           updated.set(data.userId, userData);
           return updated;
@@ -153,25 +164,32 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     );
 
     // Handle user position update
-    socket.on(
+    socketInstance.on(
       "user-moved",
       (data: { userId: string; position: { x: number; y: number } }) => {
-        setOtherUsers((prev) => {
-          const updated = new Map(prev);
-          const user = updated.get(data.userId);
-          if (user) {
-            updated.set(data.userId, {
-              ...user,
-              position: data.position,
-            });
-          }
-          return updated;
-        });
+        const currentMyUserId = myUserIdRef.current || socketInstance.id;
+        // Update other users
+        if (data.userId !== currentMyUserId) {
+          setOtherUsers((prev) => {
+            const updated = new Map(prev);
+            const user = updated.get(data.userId);
+            if (user) {
+              updated.set(data.userId, {
+                ...user,
+                position: data.position,
+              });
+            }
+            return updated;
+          });
+        } else {
+          // Update our own position if someone else moved our token
+          setMyPosition(data.position);
+        }
       }
     );
 
     // Handle user leaving (deprecated - now using user-disconnected)
-    socket.on("user-left", (data: { userId: string }) => {
+    socketInstance.on("user-left", (data: { userId: string }) => {
       setOtherUsers((prev) => {
         const updated = new Map(prev);
         updated.delete(data.userId);
@@ -180,7 +198,7 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     });
 
     // Handle user disconnecting (moved to disconnected state)
-    socket.on("user-disconnected", (data: { userId: string; persistentUserId: string; color: string; position: { x: number; y: number } }) => {
+    socketInstance.on("user-disconnected", (data: { userId: string; persistentUserId: string; color: string; position: { x: number; y: number } }) => {
       // Remove from active users
       setOtherUsers((prev) => {
         const updated = new Map(prev);
@@ -203,7 +221,7 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     });
 
     // Handle user reconnecting
-    socket.on(
+    socketInstance.on(
       "user-reconnected",
       (data: {
         userId: string;
@@ -220,12 +238,12 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
         // Add back to active users
         setOtherUsers((prev) => {
           const updated = new Map(prev);
-          const userData: User & { persistentUserId?: string } = {
+          const userData: UserWithPersistentId = {
             id: data.userId,
             color: data.color,
             position: data.position,
+            persistentUserId: data.persistentUserId,
           };
-          (userData as any).persistentUserId = data.persistentUserId;
           updated.set(data.userId, userData);
           return updated;
         });
@@ -233,7 +251,7 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     );
 
     // Handle token removal
-    socket.on("token-removed", (data: { persistentUserId: string }) => {
+    socketInstance.on("token-removed", (data: { persistentUserId: string }) => {
       setDisconnectedUsers((prev) => {
         const updated = new Map(prev);
         updated.delete(data.persistentUserId);
@@ -244,7 +262,8 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
         const updated = new Map(prev);
         // Find and remove by persistentUserId if it matches
         for (const [userId, user] of updated.entries()) {
-          if ((user as any).persistentUserId === data.persistentUserId) {
+          const userWithPersistentId = user as UserWithPersistentId;
+          if (userWithPersistentId.persistentUserId === data.persistentUserId) {
             updated.delete(userId);
             break;
           }
@@ -254,7 +273,7 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     });
 
     // Handle disconnected users list (for display mode users to track)
-    socket.on("disconnected-users", (disconnectedUsersList: User[]) => {
+    socketInstance.on("disconnected-users", (disconnectedUsersList: User[]) => {
       // Store disconnected users so their tokens remain visible
       const disconnectedMap = new Map<string, User>();
       disconnectedUsersList.forEach((user) => {
@@ -265,14 +284,45 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
 
     // Cleanup on unmount
     return () => {
-      socket.disconnect();
+      socketInstance.disconnect();
     };
-  }, []);
+  }, [isDisplay]);
 
   const updateMyPosition = (position: Position) => {
     setMyPosition(position);
+    if (socketRef.current && myUserId) {
+      socketRef.current.emit("position-update", {
+        tokenId: myUserId,
+        position,
+      });
+    }
+  };
+
+  const updateTokenPosition = (tokenId: string, position: Position) => {
+    // If it's our own token, update local state
+    if (tokenId === myUserId) {
+      setMyPosition(position);
+    } else {
+      // Update other user's position in local state immediately for responsiveness
+      setOtherUsers((prev) => {
+        const updated = new Map(prev);
+        const user = updated.get(tokenId);
+        if (user) {
+          updated.set(tokenId, {
+            ...user,
+            position,
+          });
+        }
+        return updated;
+      });
+    }
+    
+    // Send update to server
     if (socketRef.current) {
-      socketRef.current.emit("position-update", position);
+      socketRef.current.emit("position-update", {
+        tokenId,
+        position,
+      });
     }
   };
 
@@ -288,8 +338,9 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     myPosition,
     otherUsers,
     disconnectedUsers,
-    socket: socketRef.current,
+    socket,
     updateMyPosition,
+    updateTokenPosition,
     removeToken,
   };
 };

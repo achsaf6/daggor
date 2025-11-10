@@ -1,5 +1,11 @@
-import { User, ImageBounds } from "../types";
-import { UserToken } from "./UserToken";
+import { User, ImageBounds, Position } from "../types";
+import { DraggableToken } from "./DraggableToken";
+
+interface TransformConfig {
+  scale: number;
+  translateX: number;
+  translateY: number;
+}
 
 interface TokenManagerProps {
   activeUsers: Map<string, User>;
@@ -14,9 +20,15 @@ interface TokenManagerProps {
     imageHeight: number;
   };
   gridScale?: number;
+  gridOffsetX?: number;
+  gridOffsetY?: number;
   isMounted?: boolean;
   isDisplay?: boolean;
+  myUserId?: string | null;
   onRemoveToken?: (persistentUserId: string) => void;
+  onPositionUpdate: (tokenId: string, position: Position) => void;
+  transform?: TransformConfig;
+  onDragStateChange?: (tokenId: string, isDragging: boolean) => void;
 }
 
 export const TokenManager = ({
@@ -27,9 +39,15 @@ export const TokenManager = ({
   worldMapHeight = 0,
   gridData,
   gridScale = 1.0,
+  gridOffsetX = 0,
+  gridOffsetY = 0,
   isMounted,
   isDisplay = false,
+  myUserId,
   onRemoveToken,
+  onPositionUpdate,
+  transform,
+  onDragStateChange,
 }: TokenManagerProps) => {
   if (!imageBounds) return null;
 
@@ -56,10 +74,14 @@ export const TokenManager = ({
     <>
       {/* Render active users */}
       {Array.from(activeUsers.values()).map((user) => {
-        const persistentUserId = (user as any).persistentUserId || user.id;
+        const userWithPersistentId = user as User & { persistentUserId?: string };
+        const persistentUserId = userWithPersistentId.persistentUserId || user.id;
+        // Token is interactive if in display mode OR if it's the user's own token
+        const isTokenInteractive = isDisplay || user.id === myUserId;
         return (
-          <UserToken
+          <DraggableToken
             key={user.id}
+            tokenId={user.id}
             position={user.position}
             color={user.color}
             imageBounds={imageBounds}
@@ -67,31 +89,48 @@ export const TokenManager = ({
             worldMapHeight={worldMapHeight}
             gridData={gridData}
             gridScale={gridScale}
+            gridOffsetX={gridOffsetX}
+            gridOffsetY={gridOffsetY}
             isMounted={isMounted}
             onClick={isDisplay ? (e) => handleTokenClick(e, persistentUserId) : undefined}
             onContextMenu={isDisplay ? (e) => handleTokenContextMenu(e, persistentUserId) : undefined}
             title={isDisplay ? "Double-click or right-click to remove" : undefined}
+            onPositionUpdate={onPositionUpdate}
+            transform={transform}
+            onDragStateChange={onDragStateChange}
+            isInteractive={isTokenInteractive}
           />
         );
       })}
       {/* Render disconnected users (with reduced opacity to indicate they're disconnected) */}
-      {Array.from(disconnectedUsers.values()).map((user) => (
-        <UserToken
-          key={user.id}
-          position={user.position}
-          color={user.color}
-          imageBounds={imageBounds}
-          worldMapWidth={worldMapWidth}
-          worldMapHeight={worldMapHeight}
-          gridData={gridData}
-          gridScale={gridScale}
-          isMounted={isMounted}
-          opacity={0.6}
-          onClick={isDisplay ? (e) => handleTokenClick(e, user.id) : undefined}
-          onContextMenu={isDisplay ? (e) => handleTokenContextMenu(e, user.id) : undefined}
-          title={isDisplay ? "Disconnected - Double-click or right-click to remove" : "Disconnected"}
-        />
-      ))}
+      {Array.from(disconnectedUsers.values()).map((user) => {
+        // Disconnected tokens are only interactive in display mode (they can't be the user's own token since they're disconnected)
+        const isTokenInteractive = isDisplay;
+        return (
+          <DraggableToken
+            key={user.id}
+            tokenId={user.id}
+            position={user.position}
+            color={user.color}
+            imageBounds={imageBounds}
+            worldMapWidth={worldMapWidth}
+            worldMapHeight={worldMapHeight}
+            gridData={gridData}
+            gridScale={gridScale}
+            gridOffsetX={gridOffsetX}
+            gridOffsetY={gridOffsetY}
+            isMounted={isMounted}
+            opacity={0.6}
+            onClick={isDisplay ? (e) => handleTokenClick(e, user.id) : undefined}
+            onContextMenu={isDisplay ? (e) => handleTokenContextMenu(e, user.id) : undefined}
+            title={isDisplay ? "Disconnected - Double-click or right-click to remove" : "Disconnected"}
+            onPositionUpdate={onPositionUpdate}
+            transform={transform}
+            onDragStateChange={onDragStateChange}
+            isInteractive={isTokenInteractive}
+          />
+        );
+      })}
     </>
   );
 };

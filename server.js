@@ -122,13 +122,27 @@ app.prepare().then(() => {
     }, 1000);
 
     // Handle position updates
-    socket.on('position-update', (position) => {
-      const user = users.get(userId);
-      if (user) {
-        user.position = position;
-        // Broadcast to all other clients
-        socket.broadcast.emit('user-moved', {
-          userId,
+    socket.on('position-update', (data) => {
+      // Support both old format (just position) and new format (tokenId + position)
+      let targetUserId = userId;
+      let position;
+      
+      if (data && typeof data === 'object' && data.tokenId && data.position) {
+        // New format: { tokenId, position }
+        targetUserId = data.tokenId;
+        position = data.position;
+      } else {
+        // Old format: just position (backward compatibility)
+        position = data;
+      }
+
+      // Find the target user (could be the sender or any other user)
+      const targetUser = users.get(targetUserId);
+      if (targetUser) {
+        targetUser.position = position;
+        // Broadcast to all clients (including sender) so everyone sees the update
+        io.emit('user-moved', {
+          userId: targetUserId,
           position,
         });
       }
