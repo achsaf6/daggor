@@ -24,8 +24,8 @@ export const MapView = () => {
   const { settings, setGridScale, setGridOffset } = useSettings();
 
   // Extract world map dimensions from gridData for coordinate mapping
-  const worldMapWidth = gridData?.imageWidth || 0;
-  const worldMapHeight = gridData?.imageHeight || 0;
+  const worldMapWidth = gridData.imageWidth || 0;
+  const worldMapHeight = gridData.imageHeight || 0;
 
   const coordinateMapper = useCoordinateMapper(
     imageBounds,
@@ -321,7 +321,7 @@ export const MapView = () => {
       )}
       <div style={mapWrapperStyle}>
         <MapImage onLoad={updateBounds} />
-        {imageBounds && gridData && (
+        {imageBounds && (
           <GridLines
             gridData={gridData}
             imageBounds={imageBounds}

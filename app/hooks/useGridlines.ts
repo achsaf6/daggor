@@ -7,8 +7,15 @@ interface GridData {
   imageHeight: number;
 }
 
+const defaultGridData: GridData = {
+  verticalLines: [],
+  horizontalLines: [],
+  imageWidth: 0,
+  imageHeight: 0,
+};
+
 export const useGridlines = (mapName?: string) => {
-  const [gridData, setGridData] = useState<GridData | null>(null);
+  const [gridData, setGridData] = useState<GridData>(defaultGridData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,6 +39,7 @@ export const useGridlines = (mapName?: string) => {
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
         console.error('Error fetching gridlines:', err);
+        setGridData(defaultGridData);
       } finally {
         setLoading(false);
       }
