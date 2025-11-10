@@ -62,9 +62,9 @@ export const getViewportSize = (
 };
 
 /**
- * Get circle size as percentage of image width
+ * Get token size as percentage of image width
  */
-export const getCircleSizePercent = (): number => {
+export const getTokenSizePercent = (): number => {
   return 5; // 5% of image width
 };
 

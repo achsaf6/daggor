@@ -10,8 +10,8 @@ import { useCoordinateMapper } from "../hooks/useCoordinateMapper";
 import { usePan } from "../hooks/usePan";
 import { useSettings } from "../hooks/useSettings";
 import { MapImage } from "./MapImage";
-import { UserCircle } from "./UserCircle";
-import { UserCircles } from "./UserCircles";
+import { UserToken } from "./UserToken";
+import { UserTokens } from "./UserTokens";
 import { GridLines } from "./GridLines";
 import { MapSettings } from "./MapSettings";
 
@@ -34,7 +34,7 @@ export const MapView = () => {
   );
 
   // Helper function to calculate center transform
-  // This calculates the translate needed to center the user's circle
+  // This calculates the translate needed to center the user's token
   // CSS transforms apply right-to-left: scale(zoomScale) translate(x, y) means translate first, then scale
   // With transformOrigin: center center, the scale happens around the center point
   // After translate(t) then scale(s) around center C:
@@ -144,13 +144,13 @@ export const MapView = () => {
   }, [isMobile, isMounted, zoomScale, pan.panState, initialCenterTransform]);
 
   const {
-    isDragging: isCircleDragging,
-    handleMouseDown: handleCircleMouseDown,
-    handleTouchStart: handleCircleTouchStart,
-    handleMouseMove: handleCircleMouseMove,
-    handleTouchMove: handleCircleTouchMove,
-    handleMouseUp: handleCircleMouseUp,
-    handleTouchEnd: handleCircleTouchEnd,
+    isDragging: isTokenDragging,
+    handleMouseDown: handleTokenMouseDown,
+    handleTouchStart: handleTokenTouchStart,
+    handleMouseMove: handleTokenMouseMove,
+    handleTouchMove: handleTokenTouchMove,
+    handleMouseUp: handleTokenMouseUp,
+    handleTouchEnd: handleTokenTouchEnd,
   } = usePosition(
     imageBounds, 
     updateMyPosition, 
@@ -159,15 +159,15 @@ export const MapView = () => {
     mobileTransform
   );
 
-  // Handle panning on container (not user circle)
+  // Handle panning on container (not user token)
   const handleContainerMouseDown = useCallback((e: React.MouseEvent) => {
     if (!isMobile) return;
-    // Only start pan if not clicking on user circle
+    // Only start pan if not clicking on user token
     const target = e.target as HTMLElement;
-    if (target.closest('[data-user-circle]')) {
-      return; // Let user circle handle it
+    if (target.closest('[data-user-token]')) {
+      return; // Let user token handle it
     }
-    e.stopPropagation(); // Prevent circle handlers from firing
+    e.stopPropagation(); // Prevent token handlers from firing
     pan.startPan(e.clientX, e.clientY);
     pan.trackInteraction();
   }, [isMobile, pan]);
@@ -175,10 +175,10 @@ export const MapView = () => {
   const handleContainerTouchStart = useCallback((e: React.TouchEvent) => {
     if (!isMobile) return;
     const target = e.target as HTMLElement;
-    if (target.closest('[data-user-circle]')) {
+    if (target.closest('[data-user-token]')) {
       return;
     }
-    e.stopPropagation(); // Prevent circle handlers from firing
+    e.stopPropagation(); // Prevent token handlers from firing
     const touch = e.touches[0];
     if (touch) {
       pan.startPan(touch.clientX, touch.clientY);
@@ -188,24 +188,24 @@ export const MapView = () => {
 
   const handleContainerMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isMobile) return;
-    // Only pan if we're actively panning and not dragging circle
-    if (pan.panState.isPanning && !isCircleDragging) {
+    // Only pan if we're actively panning and not dragging token
+    if (pan.panState.isPanning && !isTokenDragging) {
       pan.updatePan(e.clientX, e.clientY);
       pan.trackInteraction();
     }
-  }, [isMobile, pan, isCircleDragging]);
+  }, [isMobile, pan, isTokenDragging]);
 
   const handleContainerTouchMove = useCallback((e: React.TouchEvent) => {
     if (!isMobile) return;
-    // Only pan if we're actively panning and not dragging circle
-    if (pan.panState.isPanning && !isCircleDragging) {
+    // Only pan if we're actively panning and not dragging token
+    if (pan.panState.isPanning && !isTokenDragging) {
       const touch = e.touches[0];
       if (touch) {
         pan.updatePan(touch.clientX, touch.clientY);
         pan.trackInteraction();
       }
     }
-  }, [isMobile, pan, isCircleDragging]);
+  }, [isMobile, pan, isTokenDragging]);
 
   const handleContainerMouseUp = useCallback(() => {
     if (!isMobile) return;
@@ -242,51 +242,51 @@ export const MapView = () => {
       className="fixed inset-0 m-0 p-0 overflow-hidden"
       onMouseDown={isMobile ? handleContainerMouseDown : undefined}
       onMouseMove={(e) => {
-        // In mobile mode, prioritize circle dragging if dragging, otherwise allow panning
+        // In mobile mode, prioritize token dragging if dragging, otherwise allow panning
         if (isMobile) {
-          if (isCircleDragging) {
-            handleCircleMouseMove(e);
+          if (isTokenDragging) {
+            handleTokenMouseMove(e);
           } else if (pan.panState.isPanning) {
             handleContainerMouseMove(e);
           }
         } else {
-          handleCircleMouseMove(e);
+          handleTokenMouseMove(e);
         }
       }}
       onMouseUp={() => {
         if (isMobile) {
           handleContainerMouseUp();
-          handleCircleMouseUp();
+          handleTokenMouseUp();
         } else {
-          handleCircleMouseUp();
+          handleTokenMouseUp();
         }
       }}
       onMouseLeave={() => {
         if (isMobile) {
           handleContainerMouseUp();
-          handleCircleMouseUp();
+          handleTokenMouseUp();
         } else {
-          handleCircleMouseUp();
+          handleTokenMouseUp();
         }
       }}
       onTouchStart={isMobile ? handleContainerTouchStart : undefined}
       onTouchMove={(e) => {
         if (isMobile) {
-          if (isCircleDragging) {
-            handleCircleTouchMove(e);
+          if (isTokenDragging) {
+            handleTokenTouchMove(e);
           } else if (pan.panState.isPanning) {
             handleContainerTouchMove(e);
           }
         } else {
-          handleCircleTouchMove(e);
+          handleTokenTouchMove(e);
         }
       }}
       onTouchEnd={() => {
         if (isMobile) {
           handleContainerTouchEnd();
-          handleCircleTouchEnd();
+          handleTokenTouchEnd();
         } else {
-          handleCircleTouchEnd();
+          handleTokenTouchEnd();
         }
       }}
       onClick={(e) => {
@@ -323,24 +323,28 @@ export const MapView = () => {
           />
         )}
         {imageBounds && (
-          <div data-user-circle>
-            <UserCircle
+          <div data-user-token>
+            <UserToken
               position={myPosition}
               color={myColor}
               imageBounds={imageBounds}
               worldMapWidth={worldMapWidth}
               worldMapHeight={worldMapHeight}
               isInteractive={true}
-              onMouseDown={handleCircleMouseDown}
-              onTouchStart={handleCircleTouchStart}
+              onMouseDown={handleTokenMouseDown}
+              onTouchStart={handleTokenTouchStart}
+              gridData={gridData}
+              gridScale={settings.gridScale}
             />
           </div>
         )}
-        <UserCircles 
+        <UserTokens 
           users={otherUsers} 
           imageBounds={imageBounds}
           worldMapWidth={worldMapWidth}
           worldMapHeight={worldMapHeight}
+          gridData={gridData}
+          gridScale={settings.gridScale}
         />
       </div>
     </div>
