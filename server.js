@@ -39,6 +39,9 @@ app.prepare().then(() => {
   // Create Socket.IO server
   const io = new Server(httpServer);
 
+  // Store display mode users separately (they're not in the users Map)
+  const displayModeUsers = new Map(); // socketId -> userData
+
   io.on('connection', (socket) => {
     const userId = socket.id;
     let userData = null;
@@ -79,6 +82,9 @@ app.prepare().then(() => {
       // Display mode users should not be visible to other users
       if (!isDisplay) {
         users.set(userId, userData);
+      } else {
+        // Store display mode users separately so we can verify removal requests
+        displayModeUsers.set(userId, userData);
       }
 
       // Send current user their info and all existing users (including disconnected)
@@ -164,6 +170,8 @@ app.prepare().then(() => {
     // Handle disconnect
     socket.on('disconnect', () => {
       const user = users.get(userId);
+      const displayUser = displayModeUsers.get(userId);
+      
       if (user) {
         // Don't delete - move to disconnected users (in-memory)
         // Only do this for non-display users (display users are never in the users Map)
@@ -186,18 +194,24 @@ app.prepare().then(() => {
           color: user.color,
           position: user.position,
         });
+      } else if (displayUser) {
+        // Clean up display mode user
+        displayModeUsers.delete(userId);
       }
-      // Display mode users are silently disconnected (they were never in the users Map)
     });
 
     // Handle token removal (only from display mode users)
     socket.on('remove-token', (data) => {
-      const user = users.get(userId);
-      if (user && user.isDisplay && data.persistentUserId) {
+      // Check both regular users and display mode users
+      const user = users.get(userId) || displayModeUsers.get(userId);
+      const isDisplayUser = displayModeUsers.has(userId);
+      
+      if (isDisplayUser && data.persistentUserId) {
         // Remove from disconnected users
         if (disconnectedUsers.has(data.persistentUserId)) {
           disconnectedUsers.delete(data.persistentUserId);
         }
+        
         // Also check active users (in case they're still connected)
         for (const [activeUserId, activeUser] of users.entries()) {
           if (activeUser.persistentUserId === data.persistentUserId) {
@@ -210,6 +224,7 @@ app.prepare().then(() => {
             break;
           }
         }
+        
         // Broadcast removal to all clients
         io.emit('token-removed', { persistentUserId: data.persistentUserId });
       }

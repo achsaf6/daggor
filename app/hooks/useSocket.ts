@@ -65,9 +65,10 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     });
 
     socketRef.current = socketInstance;
-    // Necessary to make socket available in return value - this is safe as it only runs once on mount
-    // eslint-disable-next-line react-compiler/react-compiler
-    setSocket(socketInstance);
+    // Necessary to make socket available in return value - defer state update to avoid synchronous setState
+    queueMicrotask(() => {
+      setSocket(socketInstance);
+    });
 
     // Handle connection
     socketInstance.on("connect", () => {
@@ -258,6 +259,7 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
         updated.delete(data.persistentUserId);
         return updated;
       });
+      
       // Also check active users (in case they're still connected)
       setOtherUsers((prev) => {
         const updated = new Map(prev);

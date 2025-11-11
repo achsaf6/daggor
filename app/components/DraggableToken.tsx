@@ -57,6 +57,12 @@ export const DraggableToken = ({
   onDragStateChange,
   isInteractive = true,
 }: DraggableTokenProps) => {
+  // Track initial mouse position to distinguish clicks from drags
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const hasMovedRef = useRef(false);
+  // Track if we should prevent click events (only if we actually dragged)
+  const shouldPreventClickRef = useRef(false);
+
   // Create a callback that updates this specific token's position
   const handlePositionUpdate = useCallback(
     (newPosition: Position) => {
@@ -87,13 +93,74 @@ export const DraggableToken = ({
     }
   );
 
-  // Prevent dragging if not interactive
+  // Wrap handleMouseMove to track if mouse has moved (to distinguish click from drag)
+  const wrappedHandleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (dragStartPosRef.current) {
+        const dx = Math.abs(e.clientX - dragStartPosRef.current.x);
+        const dy = Math.abs(e.clientY - dragStartPosRef.current.y);
+        // If mouse moved more than 5 pixels, consider it a drag
+        if (dx > 5 || dy > 5) {
+          hasMovedRef.current = true;
+          shouldPreventClickRef.current = true;
+        }
+      }
+      handleMouseMove(e);
+    },
+    [handleMouseMove]
+  );
+
+  // Wrap handleMouseUp to allow clicks to fire if no drag occurred
+  const wrappedHandleMouseUp = useCallback(() => {
+    handleMouseUp();
+    
+    // Reset drag tracking (keep shouldPreventClickRef until click fires)
+    dragStartPosRef.current = null;
+    hasMovedRef.current = false;
+    
+    // Don't reset shouldPreventClickRef here - let handleClick reset it
+    // This ensures we can distinguish between clicks and drags when click fires
+  }, [handleMouseUp]);
+
+  // Prevent dragging if not interactive, and handle clicks vs drags
   const handleInteractiveMouseDown = useCallback(
     (e: React.MouseEvent) => {
+      // Don't start drag on right-click
+      if (e.button === 2) {
+        return;
+      }
+      
       if (!isInteractive) return;
+      
+      // Store initial position to detect if this is a click or drag
+      dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+      hasMovedRef.current = false;
+      shouldPreventClickRef.current = false;
+      
       handleMouseDown(e);
     },
     [isInteractive, handleMouseDown]
+  );
+
+  // Wrap onClick to prevent it if we actually dragged
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      // Only prevent click if we actually dragged
+      const shouldPrevent = shouldPreventClickRef.current;
+      // Reset the flag now that we've checked it
+      shouldPreventClickRef.current = false;
+      
+      if (shouldPrevent) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      // Otherwise, let the onClick handler fire
+      if (onClick) {
+        onClick(e);
+      }
+    },
+    [onClick]
   );
 
   const handleInteractiveTouchStart = useCallback(
@@ -113,20 +180,20 @@ export const DraggableToken = ({
 
   // Store handlers in refs so we can attach them to document for global mouse tracking
   const handlersRef = useRef({
-    handleMouseMove,
+    handleMouseMove: wrappedHandleMouseMove,
     handleTouchMove,
-    handleMouseUp,
+    handleMouseUp: wrappedHandleMouseUp,
     handleTouchEnd,
   });
 
   useEffect(() => {
     handlersRef.current = {
-      handleMouseMove,
+      handleMouseMove: wrappedHandleMouseMove,
       handleTouchMove,
-      handleMouseUp,
+      handleMouseUp: wrappedHandleMouseUp,
       handleTouchEnd,
     };
-  }, [handleMouseMove, handleTouchMove, handleMouseUp, handleTouchEnd]);
+  }, [wrappedHandleMouseMove, handleTouchMove, wrappedHandleMouseUp, handleTouchEnd]);
 
   // Attach global mouse/touch handlers when dragging
   useEffect(() => {
@@ -173,6 +240,16 @@ export const DraggableToken = ({
     };
   }, [isDragging]);
 
+  // Wrap onContextMenu handler
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      if (onContextMenu) {
+        onContextMenu(e);
+      }
+    },
+    [onContextMenu]
+  );
+
   return (
     <UserToken
       position={position}
@@ -188,8 +265,8 @@ export const DraggableToken = ({
       isInteractive={isInteractive}
       onMouseDown={handleInteractiveMouseDown}
       onTouchStart={handleInteractiveTouchStart}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
     />
   );
 };

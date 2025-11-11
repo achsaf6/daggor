@@ -151,8 +151,12 @@ export const usePosition = (
   }, [lastPosition, gridSnapConfig, onPositionUpdate]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+    // Don't prevent default on right-click to allow context menu
+    if (e.button === 2) {
+      return;
+    }
+    // Don't prevent default immediately - let clicks pass through
+    // We'll prevent default in mousemove if it becomes a drag
     setIsDragging(true);
   }, []);
 
@@ -165,6 +169,7 @@ export const usePosition = (
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (!isDragging) return;
+      // Prevent default only when actually dragging (not on initial mousedown)
       e.preventDefault();
       updatePosition(e.clientX, e.clientY);
     },
