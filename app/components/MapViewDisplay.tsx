@@ -8,7 +8,7 @@ import { useSettings } from "../hooks/useSettings";
 import { MapImage } from "./MapImage";
 import { TokenManager } from "./TokenManager";
 import { GridLines } from "./GridLines";
-import { MapSettings } from "./MapSettings";
+import { SidebarToolbar } from "./SidebarToolbar";
 
 export const MapViewDisplay = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -30,7 +30,7 @@ export const MapViewDisplay = () => {
       className="fixed inset-0 m-0 p-0 overflow-hidden"
       style={{ touchAction: "none" }}
     >
-      <MapSettings
+      <SidebarToolbar
         gridScale={settings.gridScale}
         onGridScaleChange={setGridScale}
         gridOffsetX={settings.gridOffsetX}
