@@ -65,17 +65,24 @@ app.prepare().then(() => {
       const color = restoredUserData?.color || getRandomColor();
       const position = restoredUserData?.position || { x: 50, y: 50 };
 
+      const isDisplay = data?.isDisplay || false;
+
       userData = {
         id: userId,
         persistentUserId: persistentUserId || userId, // Use persistent ID if available
         color,
         position,
-        isDisplay: data?.isDisplay || false, // Track if this is a display mode user
+        isDisplay, // Track if this is a display mode user
       };
 
-      users.set(userId, userData);
+      // Only add to users Map if NOT in display mode
+      // Display mode users should not be visible to other users
+      if (!isDisplay) {
+        users.set(userId, userData);
+      }
 
       // Send current user their info and all existing users (including disconnected)
+      // Display mode users still receive their own info, but won't be added to the users list
       socket.emit('user-connected', {
         userId,
         persistentUserId: userData.persistentUserId,
@@ -83,8 +90,10 @@ app.prepare().then(() => {
         position,
       });
 
-      // Send all active users
-      socket.emit('all-users', Array.from(users.values()));
+      // Send all active users (excluding display mode users)
+      // Filter out any display mode users that might have been added
+      const activeUsersList = Array.from(users.values()).filter(user => !user.isDisplay);
+      socket.emit('all-users', activeUsersList);
 
       // Send disconnected users (for display mode users to track)
       const disconnectedUsersList = Array.from(disconnectedUsers.values());
@@ -92,22 +101,26 @@ app.prepare().then(() => {
         socket.emit('disconnected-users', disconnectedUsersList);
       }
 
-      // Broadcast new user to all other clients (only if not a restoration)
-      if (!restoredUserData) {
-        socket.broadcast.emit('user-joined', {
-          userId,
-          persistentUserId: userData.persistentUserId,
-          color,
-          position,
-        });
-      } else {
-        // User reconnected - broadcast reconnection
-        socket.broadcast.emit('user-reconnected', {
-          userId,
-          persistentUserId: userData.persistentUserId,
-          color,
-          position,
-        });
+      // Only broadcast new user to all other clients if NOT in display mode
+      // Display mode users should not be visible to other users
+      if (!isDisplay) {
+        // Broadcast new user to all other clients (only if not a restoration)
+        if (!restoredUserData) {
+          socket.broadcast.emit('user-joined', {
+            userId,
+            persistentUserId: userData.persistentUserId,
+            color,
+            position,
+          });
+        } else {
+          // User reconnected - broadcast reconnection
+          socket.broadcast.emit('user-reconnected', {
+            userId,
+            persistentUserId: userData.persistentUserId,
+            color,
+            position,
+          });
+        }
       }
     };
 
@@ -153,6 +166,7 @@ app.prepare().then(() => {
       const user = users.get(userId);
       if (user) {
         // Don't delete - move to disconnected users (in-memory)
+        // Only do this for non-display users (display users are never in the users Map)
         const persistentId = user.persistentUserId || userId;
         const disconnectedUserData = {
           id: persistentId, // Use persistent ID for disconnected users
@@ -173,6 +187,7 @@ app.prepare().then(() => {
           position: user.position,
         });
       }
+      // Display mode users are silently disconnected (they were never in the users Map)
     });
 
     // Handle token removal (only from display mode users)

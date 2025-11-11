@@ -6,14 +6,13 @@ import { useImageBounds } from "../hooks/useImageBounds";
 import { useGridlines } from "../hooks/useGridlines";
 import { useSettings } from "../hooks/useSettings";
 import { MapImage } from "./MapImage";
-import { DraggableToken } from "./DraggableToken";
 import { TokenManager } from "./TokenManager";
 import { GridLines } from "./GridLines";
 import { MapSettings } from "./MapSettings";
 
 export const MapViewDisplay = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { myUserId, myColor, myPosition, otherUsers, disconnectedUsers, updateTokenPosition, removeToken } = useSocket(true);
+  const { myUserId, otherUsers, disconnectedUsers, updateTokenPosition, removeToken } = useSocket(true);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const { gridData } = useGridlines();
   const { settings, setGridScale, setGridOffset } = useSettings();
@@ -47,26 +46,6 @@ export const MapViewDisplay = () => {
           gridOffsetX={settings.gridOffsetX}
           gridOffsetY={settings.gridOffsetY}
         />
-      )}
-      {imageBounds && myUserId && (
-        <div data-token>
-          <DraggableToken
-            tokenId={myUserId}
-            position={myPosition}
-            color={myColor}
-            imageBounds={imageBounds}
-            worldMapWidth={worldMapWidth}
-            worldMapHeight={worldMapHeight}
-            gridData={gridData}
-            gridScale={settings.gridScale}
-            gridOffsetX={settings.gridOffsetX}
-            gridOffsetY={settings.gridOffsetY}
-            isMounted={true}
-            onPositionUpdate={updateTokenPosition}
-            transform={transform}
-            onDragStateChange={() => {}}
-          />
-        </div>
       )}
       <TokenManager
         activeUsers={otherUsers}
