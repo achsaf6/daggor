@@ -149,10 +149,6 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     socketInstance.on(
       "user-joined",
       (data: { userId: string; persistentUserId?: string; color: string; position: { x: number; y: number } }) => {
-        // Only add tokens for new users in mobile mode, not display mode
-        if (isDisplay) {
-          return;
-        }
         setOtherUsers((prev) => {
           const updated = new Map(prev);
           const userData: UserWithPersistentId = {
@@ -235,10 +231,6 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
         color: string;
         position: { x: number; y: number };
       }) => {
-        // Only add tokens for reconnecting users in mobile mode, not display mode
-        if (isDisplay) {
-          return;
-        }
         // Remove from disconnected users
         setDisconnectedUsers((prev) => {
           const updated = new Map(prev);
