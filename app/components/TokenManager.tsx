@@ -78,6 +78,8 @@ export const TokenManager = ({
         const persistentUserId = userWithPersistentId.persistentUserId || user.id;
         // Token is interactive if in display mode OR if it's the user's own token
         const isTokenInteractive = isDisplay || user.id === myUserId;
+        // User's personal token should have highest z-index
+        const tokenZIndex = user.id === myUserId ? 20 : 10;
         return (
           <DraggableToken
             key={user.id}
@@ -99,6 +101,7 @@ export const TokenManager = ({
             transform={transform}
             onDragStateChange={onDragStateChange}
             isInteractive={isTokenInteractive}
+            zIndex={tokenZIndex}
           />
         );
       })}
@@ -106,6 +109,7 @@ export const TokenManager = ({
       {Array.from(disconnectedUsers.values()).map((user) => {
         // Disconnected tokens are only interactive in display mode (they can't be the user's own token since they're disconnected)
         const isTokenInteractive = isDisplay;
+        // Disconnected tokens should have lower z-index (default 10)
         return (
           <DraggableToken
             key={user.id}
@@ -128,6 +132,7 @@ export const TokenManager = ({
             transform={transform}
             onDragStateChange={onDragStateChange}
             isInteractive={isTokenInteractive}
+            zIndex={10}
           />
         );
       })}

@@ -285,6 +285,7 @@ export const MapViewMobile = () => {
               onPositionUpdate={updateTokenPosition}
               transform={mobileTransform}
               onDragStateChange={handleDragStateChange}
+              zIndex={20}
             />
           </div>
         )}

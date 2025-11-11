@@ -34,6 +34,7 @@ interface DraggableTokenProps {
   transform?: TransformConfig;
   onDragStateChange?: (tokenId: string, isDragging: boolean) => void;
   isInteractive?: boolean;
+  zIndex?: number;
 }
 
 export const DraggableToken = ({
@@ -56,6 +57,7 @@ export const DraggableToken = ({
   transform,
   onDragStateChange,
   isInteractive = true,
+  zIndex,
 }: DraggableTokenProps) => {
   // Track initial mouse position to distinguish clicks from drags
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -267,6 +269,7 @@ export const DraggableToken = ({
       onTouchStart={handleInteractiveTouchStart}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
+      zIndex={zIndex}
     />
   );
 };
