@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
-import { User, Position } from "../types";
+import { User, Position, Cover } from "../types";
 
 interface UserWithPersistentId extends User {
   persistentUserId?: string;
@@ -12,11 +12,15 @@ interface UseSocketReturn {
   myPosition: Position;
   otherUsers: Map<string, User>;
   disconnectedUsers: Map<string, User>;
+  covers: Map<string, Cover>;
   socket: Socket | null;
   updateMyPosition: (position: Position) => void;
   updateTokenPosition: (tokenId: string, position: Position) => void;
   removeToken: (persistentUserId: string) => void;
   addToken: (color: string, position?: Position) => void;
+  addCover: (cover: Omit<Cover, "id">) => void;
+  removeCover: (id: string) => void;
+  updateCover: (id: string, updates: Partial<Cover>) => void;
 }
 
 export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
@@ -25,10 +29,37 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
   const [myPosition, setMyPosition] = useState<Position>({ x: 50, y: 50 });
   const [otherUsers, setOtherUsers] = useState<Map<string, User>>(new Map());
   const [disconnectedUsers, setDisconnectedUsers] = useState<Map<string, User>>(new Map());
+  const [covers, setCovers] = useState<Map<string, Cover>>(new Map());
   const [socket, setSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const persistentUserIdRef = useRef<string | null>(null);
   const myUserIdRef = useRef<string | null>(null);
+
+  const clamp = useCallback((value: number, min: number, max: number) => {
+    return Math.min(Math.max(value, min), max);
+  }, []);
+
+  const normalizeCover = useCallback(
+    (cover: Cover): Cover => {
+      const width = clamp(cover.width ?? 0, 0, 100);
+      const height = clamp(cover.height ?? 0, 0, 100);
+      const maxX = 100 - width;
+      const maxY = 100 - height;
+
+      return {
+        id: cover.id,
+        width,
+        height,
+        x: clamp(cover.x ?? 0, 0, maxX),
+        y: clamp(cover.y ?? 0, 0, maxY),
+        color: cover.color || "#808080",
+      };
+    },
+    [clamp]
+  );
+
+  const generateCoverId = () =>
+    `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
   useEffect(() => {
     // Get or create persistent user ID from localStorage
@@ -303,11 +334,58 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
       }
     );
 
+    socketInstance.on("all-covers", (coversList: Cover[]) => {
+      const coversMap = new Map<string, Cover>();
+      coversList.forEach((cover) => {
+        if (cover && typeof cover.id === "string") {
+          coversMap.set(cover.id, normalizeCover(cover));
+        }
+      });
+      setCovers(coversMap);
+    });
+
+    socketInstance.on("cover-added", (cover: Cover) => {
+      if (!cover || typeof cover.id !== "string") {
+        return;
+      }
+
+      setCovers((prev) => {
+        const updated = new Map(prev);
+        updated.set(cover.id, normalizeCover(cover));
+        return updated;
+      });
+    });
+
+    socketInstance.on("cover-removed", (data: { id: string }) => {
+      if (!data || typeof data.id !== "string") {
+        return;
+      }
+
+      setCovers((prev) => {
+        const updated = new Map(prev);
+        updated.delete(data.id);
+        return updated;
+      });
+    });
+
+    socketInstance.on("cover-updated", (cover: Cover) => {
+      if (!cover || typeof cover.id !== "string") {
+        return;
+      }
+
+      setCovers((prev) => {
+        const updated = new Map(prev);
+        const existing = updated.get(cover.id);
+        updated.set(cover.id, normalizeCover({ ...existing, ...cover }));
+        return updated;
+      });
+    });
+
     // Cleanup on unmount
     return () => {
       socketInstance.disconnect();
     };
-  }, [isDisplay]);
+  }, [isDisplay, normalizeCover]);
 
   const updateMyPosition = (position: Position) => {
     setMyPosition(position);
@@ -359,17 +437,74 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     }
   };
 
+  const addCover = (cover: Omit<Cover, "id">) => {
+    const newCover = normalizeCover({
+      id: generateCoverId(),
+      ...cover,
+    });
+
+    setCovers((prev) => {
+      const updated = new Map(prev);
+      updated.set(newCover.id, newCover);
+      return updated;
+    });
+
+    if (socketRef.current) {
+      socketRef.current.emit("add-cover", newCover);
+    }
+  };
+
+  const removeCover = (id: string) => {
+    setCovers((prev) => {
+      if (!prev.has(id)) {
+        return prev;
+      }
+      const updated = new Map(prev);
+      updated.delete(id);
+      return updated;
+    });
+
+    if (socketRef.current) {
+      socketRef.current.emit("remove-cover", { id });
+    }
+  };
+
+  const updateCover = (id: string, updates: Partial<Cover>) => {
+    setCovers((prev) => {
+      const existing = prev.get(id);
+      if (!existing) {
+        return prev;
+      }
+      const normalized = normalizeCover({
+        ...existing,
+        ...updates,
+        id,
+      });
+      const updated = new Map(prev);
+      updated.set(id, normalized);
+      return updated;
+    });
+
+    if (socketRef.current) {
+      socketRef.current.emit("update-cover", { id, ...updates });
+    }
+  };
+
   return {
     myUserId,
     myColor,
     myPosition,
     otherUsers,
     disconnectedUsers,
+    covers,
     socket,
     updateMyPosition,
     updateTokenPosition,
     removeToken,
     addToken,
+    addCover,
+    removeCover,
+    updateCover,
   };
 };
 

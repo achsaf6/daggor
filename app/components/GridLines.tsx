@@ -114,6 +114,7 @@ export const GridLines = ({
         mixBlendMode: 'normal',
         backgroundColor: 'transparent',
         opacity: 1,
+        zIndex: 10,
       }}
       preserveAspectRatio="none"
       fill="none"

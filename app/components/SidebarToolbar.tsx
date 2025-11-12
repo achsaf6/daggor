@@ -12,6 +12,10 @@ interface SidebarToolbarProps {
   onGridOffsetChange: (x: number, y: number) => void;
   onTokenDragStart: (color: string) => void;
   onTokenDragEnd: () => void;
+  onSquareToolToggle: () => void;
+  onSquareToolLockToggle: () => void;
+  isSquareToolActive: boolean;
+  isSquareToolLocked: boolean;
 }
 
 export const SidebarToolbar = ({
@@ -22,9 +26,16 @@ export const SidebarToolbar = ({
   onGridOffsetChange,
   onTokenDragStart,
   onTokenDragEnd,
+  onSquareToolToggle,
+  onSquareToolLockToggle,
+  isSquareToolActive,
+  isSquareToolLocked,
 }: SidebarToolbarProps) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const squareToolPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const squareToolPressStartRef = useRef<number | null>(null);
+  const squareToolLongPressDetectedRef = useRef<boolean>(false);
 
   // Close settings when clicking outside
   useEffect(() => {
@@ -42,6 +53,15 @@ export const SidebarToolbar = ({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [isSettingsOpen]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (squareToolPressTimerRef.current) {
+        clearTimeout(squareToolPressTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div
@@ -98,7 +118,93 @@ export const SidebarToolbar = ({
       {/* Token Picker */}
       <TokenPicker onTokenDragStart={onTokenDragStart} onTokenDragEnd={onTokenDragEnd} />
 
-        
+      {/* Square Cover Tool */}
+      <button
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          if (isSquareToolLocked) {
+            return;
+          }
+          squareToolPressStartRef.current = Date.now();
+          squareToolLongPressDetectedRef.current = false;
+          squareToolPressTimerRef.current = setTimeout(() => {
+            squareToolLongPressDetectedRef.current = true;
+            onSquareToolLockToggle();
+            if (squareToolPressTimerRef.current) {
+              clearTimeout(squareToolPressTimerRef.current);
+              squareToolPressTimerRef.current = null;
+            }
+            squareToolPressStartRef.current = null;
+          }, 500);
+        }}
+        onMouseUp={(e) => {
+          e.stopPropagation();
+          if (squareToolPressTimerRef.current) {
+            clearTimeout(squareToolPressTimerRef.current);
+            squareToolPressTimerRef.current = null;
+          }
+
+          if (squareToolLongPressDetectedRef.current) {
+            squareToolLongPressDetectedRef.current = false;
+            squareToolPressStartRef.current = null;
+            return;
+          }
+
+          if (isSquareToolLocked) {
+            onSquareToolLockToggle();
+            squareToolPressStartRef.current = null;
+            squareToolLongPressDetectedRef.current = false;
+            return;
+          }
+
+          const pressDuration = squareToolPressStartRef.current
+            ? Date.now() - squareToolPressStartRef.current
+            : 0;
+
+          if (pressDuration < 500) {
+            onSquareToolToggle();
+          }
+
+          squareToolPressStartRef.current = null;
+          squareToolLongPressDetectedRef.current = false;
+        }}
+        onMouseLeave={() => {
+          if (squareToolPressTimerRef.current) {
+            clearTimeout(squareToolPressTimerRef.current);
+            squareToolPressTimerRef.current = null;
+          }
+          squareToolPressStartRef.current = null;
+          squareToolLongPressDetectedRef.current = false;
+        }}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        className={`backdrop-blur-sm rounded-lg p-3 shadow-lg border text-white transition-all ${
+          isSquareToolActive
+            ? isSquareToolLocked
+              ? "bg-blue-700/90 border-blue-500 hover:bg-blue-800/90"
+              : "bg-blue-600/90 border-blue-400 hover:bg-blue-700/90"
+            : "bg-black/80 border-white/20 hover:bg-black/90"
+        }`}
+        aria-label="Square Cover Tool"
+        title={
+          isSquareToolLocked
+            ? "Square tool locked - click to unlock"
+            : "Click to create one square, hold for 0.5s to lock"
+        }
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="h-6 w-6"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        </svg>
+      </button>
     </div>
   );
 };

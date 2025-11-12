@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { useSocket } from "../hooks/useSocket";
 import { useImageBounds } from "../hooks/useImageBounds";
 import { useGridlines } from "../hooks/useGridlines";
@@ -10,12 +10,24 @@ import { MapImage } from "./MapImage";
 import { TokenManager } from "./TokenManager";
 import { GridLines } from "./GridLines";
 import { SidebarToolbar } from "./SidebarToolbar";
+import { CoverManager } from "./CoverManager";
 import { Position } from "../types";
 import { snapToGridCenter } from "../utils/coordinates";
 
 export const MapViewDisplay = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { myUserId, otherUsers, disconnectedUsers, updateTokenPosition, removeToken, addToken } = useSocket(true);
+  const {
+    myUserId,
+    otherUsers,
+    disconnectedUsers,
+    covers: socketCovers,
+    updateTokenPosition,
+    removeToken,
+    addToken,
+    addCover: emitAddCover,
+    removeCover: emitRemoveCover,
+    updateCover: emitUpdateCover,
+  } = useSocket(true);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const { gridData, settings: gridSettings } = useGridlines();
   const { settings, setGridScale, setGridOffset, isLoading: settingsLoading } = useSettings();
@@ -37,6 +49,20 @@ export const MapViewDisplay = () => {
   // Drag state for token creation
   const [draggingColor, setDraggingColor] = useState<string | null>(null);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
+
+  // Cover management
+  const covers = useMemo(() => Array.from(socketCovers.values()), [socketCovers]);
+  const [isSquareToolActive, setIsSquareToolActive] = useState(false);
+  const [isSquareToolLocked, setIsSquareToolLocked] = useState(false);
+  const [isDrawingSquare, setIsDrawingSquare] = useState(false);
+  const [squareStartPos, setSquareStartPos] = useState<{ x: number; y: number } | null>(null);
+  const [squareCurrentPos, setSquareCurrentPos] = useState<{ x: number; y: number } | null>(null);
+
+  const resetSquareDrawing = useCallback(() => {
+    setIsDrawingSquare(false);
+    setSquareStartPos(null);
+    setSquareCurrentPos(null);
+  }, []);
 
   // Track mouse position during drag
   useEffect(() => {
@@ -62,6 +88,126 @@ export const MapViewDisplay = () => {
   const handleTokenDragEnd = () => {
     setDraggingColor(null);
     setDragPosition(null);
+  };
+
+  const handleSquareToolToggle = () => {
+    if (isSquareToolLocked) {
+      setIsSquareToolLocked(false);
+      setIsSquareToolActive(false);
+      resetSquareDrawing();
+      return;
+    }
+
+    setIsSquareToolActive((prev) => {
+      const next = !prev;
+      if (!next) {
+        resetSquareDrawing();
+      }
+      return next;
+    });
+  };
+
+  const handleSquareToolLockToggle = () => {
+    setIsSquareToolLocked((prev) => {
+      const next = !prev;
+      if (next) {
+        setIsSquareToolActive(true);
+      } else {
+        setIsSquareToolActive(false);
+        resetSquareDrawing();
+      }
+      return next;
+    });
+  };
+
+  // Handle mouse events for drawing squares
+  useEffect(() => {
+    if (!isDrawingSquare || !squareStartPos || !coordinateMapper.isReady) {
+      return;
+    }
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      const imageRelative = coordinateMapper.screenToImageRelative({
+        x: e.clientX,
+        y: e.clientY,
+      });
+
+      if (imageRelative) {
+        setSquareCurrentPos({ x: imageRelative.x, y: imageRelative.y });
+      }
+    };
+
+    const handleGlobalMouseUp = () => {
+      if (!squareStartPos || !squareCurrentPos || !coordinateMapper.isReady) {
+        resetSquareDrawing();
+        return;
+      }
+
+      // Calculate square dimensions
+      const minX = Math.min(squareStartPos.x, squareCurrentPos.x);
+      const maxX = Math.max(squareStartPos.x, squareCurrentPos.x);
+      const minY = Math.min(squareStartPos.y, squareCurrentPos.y);
+      const maxY = Math.max(squareStartPos.y, squareCurrentPos.y);
+
+      const width = maxX - minX;
+      const height = maxY - minY;
+
+      // Only create cover if it has meaningful size (at least 0.5% in each dimension)
+      if (width > 0.5 && height > 0.5) {
+        emitAddCover({
+          x: minX,
+          y: minY,
+          width,
+          height,
+        });
+
+        if (!isSquareToolLocked) {
+          setIsSquareToolActive(false);
+        }
+      }
+
+      resetSquareDrawing();
+    };
+
+    document.addEventListener("mousemove", handleGlobalMouseMove);
+    document.addEventListener("mouseup", handleGlobalMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleGlobalMouseMove);
+      document.removeEventListener("mouseup", handleGlobalMouseUp);
+    };
+  }, [
+    isDrawingSquare,
+    squareStartPos,
+    squareCurrentPos,
+    coordinateMapper,
+    emitAddCover,
+    isSquareToolLocked,
+    resetSquareDrawing,
+  ]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!isSquareToolActive || !imageBounds || !coordinateMapper.isReady || draggingColor) {
+      return;
+    }
+
+    // Don't start drawing if clicking on a cover (covers handle their own events)
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-cover]')) {
+      return;
+    }
+
+    e.preventDefault();
+    const imageRelative = coordinateMapper.screenToImageRelative({
+      x: e.clientX,
+      y: e.clientY,
+    });
+
+    if (imageRelative) {
+      setIsDrawingSquare(true);
+      setSquareStartPos({ x: imageRelative.x, y: imageRelative.y });
+      setSquareCurrentPos({ x: imageRelative.x, y: imageRelative.y });
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -119,6 +265,7 @@ export const MapViewDisplay = () => {
       }}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onMouseDown={handleMouseDown}
     >
       <SidebarToolbar
         gridScale={displaySettings.gridScale}
@@ -128,8 +275,26 @@ export const MapViewDisplay = () => {
         onGridOffsetChange={setGridOffset}
         onTokenDragStart={handleTokenDragStart}
         onTokenDragEnd={handleTokenDragEnd}
+        onSquareToolToggle={handleSquareToolToggle}
+        onSquareToolLockToggle={handleSquareToolLockToggle}
+        isSquareToolActive={isSquareToolActive}
+        isSquareToolLocked={isSquareToolLocked}
       />
       <MapImage onLoad={updateBounds} />
+      <CoverManager
+        covers={covers}
+        imageBounds={imageBounds}
+        worldMapWidth={worldMapWidth}
+        worldMapHeight={worldMapHeight}
+        isDraggable
+        onRemoveCover={emitRemoveCover}
+        onPositionUpdate={(id, x, y) => {
+          emitUpdateCover(id, { x, y });
+        }}
+        onSizeUpdate={(id, width, height, x, y) => {
+          emitUpdateCover(id, { width, height, x, y });
+        }}
+      />
       {imageBounds && (
         <GridLines
           gridData={gridData}
@@ -170,6 +335,32 @@ export const MapViewDisplay = () => {
             backgroundColor: draggingColor,
           }}
         />
+      )}
+      {/* Preview square while drawing */}
+      {isDrawingSquare && squareStartPos && squareCurrentPos && imageBounds && coordinateMapper.isReady && (
+        (() => {
+          const startScreen = coordinateMapper.imageRelativeToScreen(squareStartPos);
+          const currentScreen = coordinateMapper.imageRelativeToScreen(squareCurrentPos);
+          if (!startScreen || !currentScreen) return null;
+
+          const left = Math.min(startScreen.x, currentScreen.x);
+          const top = Math.min(startScreen.y, currentScreen.y);
+          const width = Math.abs(currentScreen.x - startScreen.x);
+          const height = Math.abs(currentScreen.y - startScreen.y);
+
+          return (
+            <div
+              className="fixed border-2 border-blue-400 border-dashed shadow-lg z-30 pointer-events-none opacity-70"
+              style={{
+                left: `${left}px`,
+                top: `${top}px`,
+                width: `${width}px`,
+                height: `${height}px`,
+                backgroundColor: "rgba(59, 130, 246, 0.2)",
+              }}
+            />
+          );
+        })()
       )}
     </div>
   );

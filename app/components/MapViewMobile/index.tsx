@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useCallback, useEffect } from "react";
+import React, { useRef, useCallback, useEffect, useMemo } from "react";
 import { useSocket } from "../../hooks/useSocket";
 import { useImageBounds } from "../../hooks/useImageBounds";
 import { useGridlines } from "../../hooks/useGridlines";
@@ -10,6 +10,7 @@ import { useSettings } from "../../hooks/useSettings";
 import { MapImage } from "../MapImage";
 import { DraggableToken } from "../DraggableToken";
 import { TokenManager } from "../TokenManager";
+import { CoverManager } from "../CoverManager";
 import { GridLines } from "../GridLines";
 import { usePanZoom } from "./hooks/usePanZoom";
 import { useViewportOffset } from "./hooks/useViewportOffset";
@@ -21,7 +22,16 @@ import { TransformConfig } from "./types";
 export const MapViewMobile = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { isMounted } = useViewMode();
-  const { myUserId, myColor, myPosition, otherUsers, disconnectedUsers, updateTokenPosition, removeToken } = useSocket(false);
+  const {
+    myUserId,
+    myColor,
+    myPosition,
+    otherUsers,
+    disconnectedUsers,
+    covers: socketCovers,
+    updateTokenPosition,
+    removeToken,
+  } = useSocket(false);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const { gridData, settings: gridSettings } = useGridlines();
   const { settings, isLoading: settingsLoading } = useSettings();
@@ -40,6 +50,8 @@ export const MapViewMobile = () => {
     worldMapWidth,
     worldMapHeight
   );
+
+  const covers = useMemo(() => Array.from(socketCovers.values()), [socketCovers]);
 
   // Pan and zoom state
   const {
@@ -217,6 +229,12 @@ export const MapViewMobile = () => {
     >
       <div style={mapWrapperStyle}>
         <MapImage onLoad={updateBounds} />
+        <CoverManager
+          covers={covers}
+          imageBounds={imageBounds}
+          worldMapWidth={worldMapWidth}
+          worldMapHeight={worldMapHeight}
+        />
         {imageBounds && (
           <GridLines
             gridData={gridData}

@@ -14,6 +14,8 @@ const handler = app.getRequestHandler();
 const users = new Map();
 // Store disconnected users temporarily to restore on reconnect (in-memory)
 const disconnectedUsers = new Map();
+// Store covers (in-memory)
+const covers = new Map();
 
 // Generate random color
 function getRandomColor() {
@@ -31,6 +33,8 @@ function getRandomColor() {
   ];
   return colors[Math.floor(Math.random() * colors.length)];
 }
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 app.prepare().then(() => {
   // Create HTTP server with Next.js handler
@@ -100,6 +104,10 @@ app.prepare().then(() => {
       // Filter out any display mode users that might have been added
       const activeUsersList = Array.from(users.values()).filter(user => !user.isDisplay);
       socket.emit('all-users', activeUsersList);
+
+      if (covers.size > 0) {
+        socket.emit('all-covers', Array.from(covers.values()));
+      }
 
       // Send disconnected users (for display mode users to track)
       const disconnectedUsersList = Array.from(disconnectedUsers.values());
@@ -256,6 +264,107 @@ app.prepare().then(() => {
         color: tokenData.color,
         position: tokenData.position,
       });
+    });
+
+    socket.on('add-cover', (data) => {
+      if (!data) return;
+      const { id: incomingId, x, y, width, height, color } = data;
+
+      if (
+        typeof x !== 'number' ||
+        typeof y !== 'number' ||
+        typeof width !== 'number' ||
+        typeof height !== 'number'
+      ) {
+        return;
+      }
+
+      const id =
+        typeof incomingId === 'string' && incomingId.trim() !== ''
+          ? incomingId
+          : `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+      const sanitizedWidth = clamp(width, 0, 100);
+      const sanitizedHeight = clamp(height, 0, 100);
+      const maxX = 100 - sanitizedWidth;
+      const maxY = 100 - sanitizedHeight;
+
+      const cover = {
+        id,
+        x: clamp(x, 0, maxX),
+        y: clamp(y, 0, maxY),
+        width: sanitizedWidth,
+        height: sanitizedHeight,
+        color: typeof color === 'string' ? color : '#808080',
+      };
+
+      covers.set(id, cover);
+      io.emit('cover-added', cover);
+    });
+
+    socket.on('remove-cover', (data) => {
+      const id = data?.id;
+      if (typeof id !== 'string') {
+        return;
+      }
+
+      if (covers.delete(id)) {
+        io.emit('cover-removed', { id });
+      }
+    });
+
+    socket.on('update-cover', (data) => {
+      const id = data?.id;
+      if (typeof id !== 'string') {
+        return;
+      }
+
+      const cover = covers.get(id);
+      if (!cover) {
+        return;
+      }
+
+      const updates = {};
+
+      if (typeof data.x === 'number') {
+        updates.x = data.x;
+      }
+      if (typeof data.y === 'number') {
+        updates.y = data.y;
+      }
+      if (typeof data.width === 'number') {
+        updates.width = clamp(data.width, 0, 100);
+      }
+      if (typeof data.height === 'number') {
+        updates.height = clamp(data.height, 0, 100);
+      }
+      if (typeof data.color === 'string') {
+        updates.color = data.color;
+      }
+
+      const nextWidth = updates.width ?? cover.width;
+      const nextHeight = updates.height ?? cover.height;
+      const maxX = 100 - nextWidth;
+      const maxY = 100 - nextHeight;
+
+      const nextCover = {
+        ...cover,
+        ...updates,
+      };
+
+      if (typeof updates.x === 'number') {
+        nextCover.x = clamp(updates.x, 0, maxX);
+      } else {
+        nextCover.x = clamp(nextCover.x, 0, maxX);
+      }
+
+      if (typeof updates.y === 'number') {
+        nextCover.y = clamp(updates.y, 0, maxY);
+      } else {
+        nextCover.y = clamp(nextCover.y, 0, maxY);
+      }
+
+      covers.set(id, nextCover);
+      io.emit('cover-updated', nextCover);
     });
   });
 
