@@ -246,6 +246,13 @@ function generateGridLines(
   return gridLines.sort((a, b) => a - b);
 }
 
+const defaultGridData: GridData = {
+  verticalLines: [],
+  horizontalLines: [],
+  imageWidth: 0,
+  imageHeight: 0,
+};
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -259,10 +266,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(gridData);
   } catch (error) {
     console.error('Error detecting gridlines:', error);
-    return NextResponse.json(
-      { error: 'Failed to detect gridlines' },
-      { status: 500 }
-    );
+    return NextResponse.json(defaultGridData);
   }
 }
 

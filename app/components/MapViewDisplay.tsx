@@ -17,8 +17,13 @@ export const MapViewDisplay = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { myUserId, otherUsers, disconnectedUsers, updateTokenPosition, removeToken, addToken } = useSocket(true);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
-  const { gridData } = useGridlines();
-  const { settings, setGridScale, setGridOffset } = useSettings();
+  const { gridData, settings: gridSettings } = useGridlines();
+  const { settings, setGridScale, setGridOffset, isLoading: settingsLoading } = useSettings();
+  
+  // Use synchronized settings from useGridlines initially to prevent visual jump
+  // Once settings are loaded from useSettings, use those (they handle updates)
+  // This ensures gridlines and settings load together, then updates work correctly
+  const displaySettings = (!settingsLoading) ? settings : (gridSettings || settings);
 
   // Extract world map dimensions from gridData for coordinate mapping
   const worldMapWidth = gridData.imageWidth || 0;
@@ -89,9 +94,9 @@ export const MapViewDisplay = () => {
         position = snapToGridCenter(
           position,
           gridData,
-          settings.gridScale,
-          settings.gridOffsetX,
-          settings.gridOffsetY
+          displaySettings.gridScale,
+          displaySettings.gridOffsetX,
+          displaySettings.gridOffsetY
         );
       }
 
@@ -110,10 +115,10 @@ export const MapViewDisplay = () => {
       onDrop={handleDrop}
     >
       <SidebarToolbar
-        gridScale={settings.gridScale}
+        gridScale={displaySettings.gridScale}
         onGridScaleChange={setGridScale}
-        gridOffsetX={settings.gridOffsetX}
-        gridOffsetY={settings.gridOffsetY}
+        gridOffsetX={displaySettings.gridOffsetX}
+        gridOffsetY={displaySettings.gridOffsetY}
         onGridOffsetChange={setGridOffset}
         onTokenDragStart={handleTokenDragStart}
         onTokenDragEnd={handleTokenDragEnd}
@@ -123,9 +128,9 @@ export const MapViewDisplay = () => {
         <GridLines
           gridData={gridData}
           imageBounds={imageBounds}
-          gridScale={settings.gridScale}
-          gridOffsetX={settings.gridOffsetX}
-          gridOffsetY={settings.gridOffsetY}
+          gridScale={displaySettings.gridScale}
+          gridOffsetX={displaySettings.gridOffsetX}
+          gridOffsetY={displaySettings.gridOffsetY}
         />
       )}
       <TokenManager
@@ -135,9 +140,9 @@ export const MapViewDisplay = () => {
         worldMapWidth={worldMapWidth}
         worldMapHeight={worldMapHeight}
         gridData={gridData}
-        gridScale={settings.gridScale}
-        gridOffsetX={settings.gridOffsetX}
-        gridOffsetY={settings.gridOffsetY}
+        gridScale={displaySettings.gridScale}
+        gridOffsetX={displaySettings.gridOffsetX}
+        gridOffsetY={displaySettings.gridOffsetY}
         isMounted={true}
         isDisplay={true}
         myUserId={myUserId}

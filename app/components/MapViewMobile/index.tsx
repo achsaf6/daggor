@@ -23,8 +23,13 @@ export const MapViewMobile = () => {
   const { isMounted } = useViewMode();
   const { myUserId, myColor, myPosition, otherUsers, disconnectedUsers, updateTokenPosition, removeToken } = useSocket(false);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
-  const { gridData } = useGridlines();
-  const { settings } = useSettings();
+  const { gridData, settings: gridSettings } = useGridlines();
+  const { settings, isLoading: settingsLoading } = useSettings();
+  
+  // Use synchronized settings from useGridlines initially to prevent visual jump
+  // Once settings are loaded from useSettings, use those (they handle updates)
+  // This ensures gridlines and settings load together, then updates work correctly
+  const displaySettings = (!settingsLoading) ? settings : (gridSettings || settings);
 
   // Extract world map dimensions from gridData for coordinate mapping
   const worldMapWidth = gridData.imageWidth || 0;
@@ -210,9 +215,9 @@ export const MapViewMobile = () => {
           <GridLines
             gridData={gridData}
             imageBounds={imageBounds}
-            gridScale={settings.gridScale}
-            gridOffsetX={settings.gridOffsetX}
-            gridOffsetY={settings.gridOffsetY}
+            gridScale={displaySettings.gridScale}
+            gridOffsetX={displaySettings.gridOffsetX}
+            gridOffsetY={displaySettings.gridOffsetY}
           />
         )}
         {imageBounds && myUserId && (
@@ -225,9 +230,9 @@ export const MapViewMobile = () => {
               worldMapWidth={worldMapWidth}
               worldMapHeight={worldMapHeight}
               gridData={gridData}
-              gridScale={settings.gridScale}
-              gridOffsetX={settings.gridOffsetX}
-              gridOffsetY={settings.gridOffsetY}
+              gridScale={displaySettings.gridScale}
+              gridOffsetX={displaySettings.gridOffsetX}
+              gridOffsetY={displaySettings.gridOffsetY}
               isMounted={isMounted}
               onPositionUpdate={updateTokenPosition}
               transform={transform as TransformConfig}
@@ -243,9 +248,9 @@ export const MapViewMobile = () => {
           worldMapWidth={worldMapWidth}
           worldMapHeight={worldMapHeight}
           gridData={gridData}
-          gridScale={settings.gridScale}
-          gridOffsetX={settings.gridOffsetX}
-          gridOffsetY={settings.gridOffsetY}
+          gridScale={displaySettings.gridScale}
+          gridOffsetX={displaySettings.gridOffsetX}
+          gridOffsetY={displaySettings.gridOffsetY}
           isMounted={isMounted}
           isDisplay={false}
           myUserId={myUserId}
