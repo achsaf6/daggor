@@ -19,7 +19,11 @@ import { useHammerGestures } from "./hooks/useHammerGestures";
 import { TransformConfig } from "./types";
 import { DEFAULT_GRID_DATA, GridData, fetchGridData } from "../../utils/gridData";
 
-export const MapViewMobile = () => {
+interface MapViewMobileProps {
+  onReadyChange?: (isReady: boolean) => void;
+}
+
+export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { isMounted } = useViewMode();
   const {
@@ -36,6 +40,19 @@ export const MapViewMobile = () => {
   const { settings, isLoading: settingsLoading } = useSettings();
   const [gridData, setGridData] = React.useState<GridData | null>(null);
   const [isGridLoading, setIsGridLoading] = React.useState(true);
+
+  const isReady =
+    Boolean(imageBounds) && !isGridLoading && !settingsLoading && Boolean(gridData);
+
+  useEffect(() => {
+    onReadyChange?.(isReady);
+  }, [isReady, onReadyChange]);
+
+  useEffect(() => {
+    return () => {
+      onReadyChange?.(false);
+    };
+  }, [onReadyChange]);
 
   useEffect(() => {
     const controller = new AbortController();

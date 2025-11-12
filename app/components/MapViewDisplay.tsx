@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useRef,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
 import { useSocket } from "../hooks/useSocket";
 import { useImageBounds } from "../hooks/useImageBounds";
 import { useSettings } from "../hooks/useSettings";
@@ -14,7 +20,11 @@ import { Position } from "../types";
 import { snapToGridCenter } from "../utils/coordinates";
 import { DEFAULT_GRID_DATA, GridData, fetchGridData } from "../utils/gridData";
 
-export const MapViewDisplay = () => {
+interface MapViewDisplayProps {
+  onReadyChange?: (isReady: boolean) => void;
+}
+
+export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const {
     myUserId,
@@ -32,6 +42,19 @@ export const MapViewDisplay = () => {
   const { settings, setGridScale, setGridOffset, isLoading: settingsLoading } = useSettings();
   const [gridData, setGridData] = useState<GridData | null>(null);
   const [isGridLoading, setIsGridLoading] = useState(true);
+
+  const isReady =
+    Boolean(imageBounds) && !isGridLoading && !settingsLoading && Boolean(gridData);
+
+  useEffect(() => {
+    onReadyChange?.(isReady);
+  }, [isReady, onReadyChange]);
+
+  useEffect(() => {
+    return () => {
+      onReadyChange?.(false);
+    };
+  }, [onReadyChange]);
 
   useEffect(() => {
     const controller = new AbortController();
