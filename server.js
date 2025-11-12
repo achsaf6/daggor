@@ -168,7 +168,7 @@ app.prepare().then(() => {
       if (targetUser) {
         targetUser.position = position;
         // Broadcast to all clients (including sender) so everyone sees the update
-        io.emit('user-moved', {
+        socket.broadcast.emit('user-moved', {
           userId: targetUserId,
           position,
         });

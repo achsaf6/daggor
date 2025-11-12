@@ -3,7 +3,6 @@
 import React, { useRef, useCallback, useEffect, useMemo } from "react";
 import { useSocket } from "../../hooks/useSocket";
 import { useImageBounds } from "../../hooks/useImageBounds";
-import { useGridlines } from "../../hooks/useGridlines";
 import { useViewMode } from "../../hooks/useViewMode";
 import { useCoordinateMapper } from "../../hooks/useCoordinateMapper";
 import { useSettings } from "../../hooks/useSettings";
@@ -18,6 +17,7 @@ import { useAutoCenter } from "./hooks/useAutoCenter";
 import { useTransform } from "./hooks/useTransform";
 import { useHammerGestures } from "./hooks/useHammerGestures";
 import { TransformConfig } from "./types";
+import { DEFAULT_GRID_DATA, GridData, fetchGridData } from "../../utils/gridData";
 
 export const MapViewMobile = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -33,17 +33,51 @@ export const MapViewMobile = () => {
     removeToken,
   } = useSocket(false);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
-  const { gridData, settings: gridSettings } = useGridlines();
   const { settings, isLoading: settingsLoading } = useSettings();
-  
-  // Use synchronized settings from useGridlines initially to prevent visual jump
-  // Once settings are loaded from useSettings, use those (they handle updates)
-  // This ensures gridlines and settings load together, then updates work correctly
-  const displaySettings = (!settingsLoading) ? settings : (gridSettings || settings);
+  const [gridData, setGridData] = React.useState<GridData | null>(null);
+  const [isGridLoading, setIsGridLoading] = React.useState(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let isActive = true;
+
+    setIsGridLoading(true);
+
+    const fetchGridlines = async () => {
+      try {
+        const data = await fetchGridData(controller.signal);
+        if (!isActive) {
+          return;
+        }
+        setGridData(data);
+        setIsGridLoading(false);
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        console.error("Error fetching gridlines:", error);
+        setGridData(DEFAULT_GRID_DATA);
+        setIsGridLoading(false);
+      }
+    };
+
+    fetchGridlines();
+
+    return () => {
+      isActive = false;
+      controller.abort();
+    };
+  }, []);
+
+  const displaySettings = settings;
+  const effectiveGridData = gridData ?? DEFAULT_GRID_DATA;
 
   // Extract world map dimensions from gridData for coordinate mapping
-  const worldMapWidth = gridData.imageWidth || 0;
-  const worldMapHeight = gridData.imageHeight || 0;
+  const worldMapWidth = effectiveGridData.imageWidth || 0;
+  const worldMapHeight = effectiveGridData.imageHeight || 0;
 
   const coordinateMapper = useCoordinateMapper(
     imageBounds,
@@ -235,9 +269,9 @@ export const MapViewMobile = () => {
           worldMapWidth={worldMapWidth}
           worldMapHeight={worldMapHeight}
         />
-        {imageBounds && (
+        {imageBounds && !isGridLoading && !settingsLoading && gridData && (
           <GridLines
-            gridData={gridData}
+            gridData={effectiveGridData}
             imageBounds={imageBounds}
             gridScale={displaySettings.gridScale}
             gridOffsetX={displaySettings.gridOffsetX}
@@ -253,7 +287,7 @@ export const MapViewMobile = () => {
               imageBounds={imageBounds}
               worldMapWidth={worldMapWidth}
               worldMapHeight={worldMapHeight}
-              gridData={gridData}
+              gridData={effectiveGridData}
               gridScale={displaySettings.gridScale}
               gridOffsetX={displaySettings.gridOffsetX}
               gridOffsetY={displaySettings.gridOffsetY}
@@ -271,7 +305,7 @@ export const MapViewMobile = () => {
           imageBounds={imageBounds}
           worldMapWidth={worldMapWidth}
           worldMapHeight={worldMapHeight}
-          gridData={gridData}
+          gridData={effectiveGridData}
           gridScale={displaySettings.gridScale}
           gridOffsetX={displaySettings.gridOffsetX}
           gridOffsetY={displaySettings.gridOffsetY}
