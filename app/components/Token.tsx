@@ -140,6 +140,7 @@ export const Token = ({
         isInteractive ? "cursor-move" : ""
       }`}
       title={title}
+      draggable={false}
       style={{
         left: `${viewportPos.x}%`,
         top: `${viewportPos.y}%`,
@@ -149,6 +150,10 @@ export const Token = ({
         backgroundColor: color,
         touchAction: isInteractive ? "none" : "auto",
         opacity: opacity,
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        MozUserSelect: "none",
+        msUserSelect: "none",
       }}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}

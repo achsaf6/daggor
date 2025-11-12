@@ -135,6 +135,9 @@ export const DraggableToken = ({
       
       if (!isInteractive) return;
       
+      // Prevent text selection during drag
+      e.preventDefault();
+      
       // Store initial position to detect if this is a click or drag
       dragStartPosRef.current = { x: e.clientX, y: e.clientY };
       hasMovedRef.current = false;

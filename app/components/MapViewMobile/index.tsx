@@ -207,7 +207,13 @@ export const MapViewMobile = () => {
     <div
       ref={containerRef}
       className="fixed inset-0 m-0 p-0 overflow-hidden"
-      style={{ touchAction: "none" }}
+      style={{ 
+        touchAction: "none",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        MozUserSelect: "none",
+        msUserSelect: "none",
+      }}
     >
       <div style={mapWrapperStyle}>
         <MapImage onLoad={updateBounds} />
