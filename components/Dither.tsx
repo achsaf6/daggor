@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect, forwardRef, type ForwardedRef } from "react";
+import { useRef, useEffect, useMemo, forwardRef, type ForwardedRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { EffectComposer, wrapEffect } from "@react-three/postprocessing";
 import { Effect } from "postprocessing";
@@ -142,19 +142,26 @@ class RetroEffectImpl extends Effect {
       ['pixelSize', new THREE.Uniform(2.0)]
     ]);
     super('RetroEffect', ditherFragmentShader, { uniforms });
-    this.uniforms = uniforms;
+    // Note: this.uniforms is set by the parent Effect class and is read-only
+    // We can access it directly, but cannot reassign it
   }
-  set colorNum(v) {
-    this.uniforms.get('colorNum').value = v;
+  set colorNum(v: number) {
+    const uniform = this.uniforms.get('colorNum');
+    if (uniform) {
+      uniform.value = v;
+    }
   }
   get colorNum() {
-    return this.uniforms.get('colorNum').value;
+    return this.uniforms.get('colorNum')?.value ?? 4.0;
   }
-  set pixelSize(v) {
-    this.uniforms.get('pixelSize').value = v;
+  set pixelSize(v: number) {
+    const uniform = this.uniforms.get('pixelSize');
+    if (uniform) {
+      uniform.value = v;
+    }
   }
   get pixelSize() {
-    return this.uniforms.get('pixelSize').value;
+    return this.uniforms.get('pixelSize')?.value ?? 2.0;
   }
 }
 
@@ -200,7 +207,9 @@ function DitheredWaves({
   const mouseRef = useRef(new THREE.Vector2());
   const { viewport, size, gl } = useThree();
 
-  const waveUniformsRef = useRef({
+  // Uniforms are created once and mutated in useFrame - this is the correct pattern for R3F shaders
+  // Initial prop values are set here, then updated dynamically in useFrame
+  const waveUniforms = useMemo(() => ({
     time: new THREE.Uniform(0),
     resolution: new THREE.Uniform(new THREE.Vector2(0, 0)),
     waveSpeed: new THREE.Uniform(waveSpeed),
@@ -210,21 +219,23 @@ function DitheredWaves({
     mousePos: new THREE.Uniform(new THREE.Vector2(0, 0)),
     enableMouseInteraction: new THREE.Uniform(enableMouseInteraction ? 1 : 0),
     mouseRadius: new THREE.Uniform(mouseRadius)
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
 
   useEffect(() => {
     const dpr = gl.getPixelRatio();
     const w = Math.floor(size.width * dpr),
       h = Math.floor(size.height * dpr);
-    const res = waveUniformsRef.current.resolution.value;
+    const res = waveUniforms.resolution.value;
     if (res.x !== w || res.y !== h) {
       res.set(w, h);
     }
-  }, [size, gl]);
+  }, [size, gl, waveUniforms]);
 
   const prevColor = useRef([...waveColor]);
   useFrame(({ clock }) => {
-    const u = waveUniformsRef.current;
+    // Mutating uniform values is the correct pattern for shaders in React Three Fiber
+    const u = waveUniforms;
 
     if (!disableAnimation) {
       u.time.value = clock.getElapsedTime();
@@ -261,7 +272,7 @@ function DitheredWaves({
         <shaderMaterial
           vertexShader={waveVertexShader}
           fragmentShader={waveFragmentShader}
-          uniforms={waveUniformsRef.current}
+          uniforms={waveUniforms}
         />
       </mesh>
 
