@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { MapSettings } from "./MapSettings";
 import { TokenPicker } from "./TokenPicker";
+import { BattlemapManager } from "./BattlemapManager";
 
 interface SidebarToolbarProps {
   gridScale: number;
@@ -32,6 +33,7 @@ export const SidebarToolbar = ({
   isSquareToolLocked,
 }: SidebarToolbarProps) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMapManagerOpen, setIsMapManagerOpen] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const squareToolPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const squareToolPressStartRef = useRef<number | null>(null);
@@ -42,17 +44,18 @@ export const SidebarToolbar = ({
     const handleClickOutside = (event: MouseEvent) => {
       if (toolbarRef.current && !toolbarRef.current.contains(event.target as Node)) {
         setIsSettingsOpen(false);
+        setIsMapManagerOpen(false);
       }
     };
 
-    if (isSettingsOpen) {
+    if (isSettingsOpen || isMapManagerOpen) {
       document.addEventListener("mousedown", handleClickOutside);
     }
 
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [isSettingsOpen]);
+  }, [isSettingsOpen, isMapManagerOpen]);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -66,7 +69,7 @@ export const SidebarToolbar = ({
   return (
     <div
       ref={toolbarRef}
-      className="fixed left-4 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-2"
+      className="fixed left-4 top-1/4 -translate-y-1/2 z-50 flex flex-col gap-2"
     >
       {/* Settings Button with Gear Icon */}
       <div className="relative">
@@ -111,6 +114,49 @@ export const SidebarToolbar = ({
               gridOffsetY={gridOffsetY}
               onGridOffsetChange={onGridOffsetChange}
             />
+          </div>
+        )}
+      </div>
+
+      {/* Map Manager Button */}
+      <div className="relative">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsMapManagerOpen(!isMapManagerOpen);
+            if (!isMapManagerOpen) {
+              setIsSettingsOpen(false);
+            }
+          }}
+          className={`bg-black/80 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-white/20 text-white hover:bg-black/90 transition-all ${
+            isMapManagerOpen ? "bg-black/90" : ""
+          }`}
+          aria-label="Battlemap Manager"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3 7l6-3 6 3 6-3v13l-6 3-6-3-6 3V7z"
+            />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9 4v13m6-10v13"
+            />
+          </svg>
+        </button>
+
+        {isMapManagerOpen && (
+          <div className="absolute left-full ml-2 top-0 bg-black/80 backdrop-blur-sm rounded-lg p-4 shadow-lg border border-white/20 min-w-[320px]">
+            <BattlemapManager onClose={() => setIsMapManagerOpen(false)} />
           </div>
         )}
       </div>

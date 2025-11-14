@@ -9,7 +9,6 @@ import React, {
 } from "react";
 import { useSocket } from "../hooks/useSocket";
 import { useImageBounds } from "../hooks/useImageBounds";
-import { useSettings } from "../hooks/useSettings";
 import { useCoordinateMapper } from "../hooks/useCoordinateMapper";
 import { MapImage } from "./MapImage";
 import { TokenManager } from "./TokenManager";
@@ -18,7 +17,8 @@ import { SidebarToolbar } from "./SidebarToolbar";
 import { CoverManager } from "./CoverManager";
 import { Position } from "../types";
 import { snapToGridCenter } from "../utils/coordinates";
-import { DEFAULT_GRID_DATA, GridData, fetchGridData } from "../utils/gridData";
+import { DEFAULT_GRID_DATA } from "../utils/gridData";
+import { useBattlemap } from "../providers/BattlemapProvider";
 
 interface MapViewDisplayProps {
   onReadyChange?: (isReady: boolean) => void;
@@ -30,21 +30,22 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
     myUserId,
     otherUsers,
     disconnectedUsers,
-    covers: socketCovers,
     updateTokenPosition,
     removeToken,
     addToken,
-    addCover: emitAddCover,
-    removeCover: emitRemoveCover,
-    updateCover: emitUpdateCover,
   } = useSocket(true);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
-  const { settings, setGridScale, setGridOffset, isLoading: settingsLoading } = useSettings();
-  const [gridData, setGridData] = useState<GridData | null>(null);
-  const [isGridLoading, setIsGridLoading] = useState(true);
+  const {
+    currentBattlemap,
+    isBattlemapLoading,
+    updateBattlemapSettings,
+    addCover,
+    updateCover,
+    removeCover,
+  } = useBattlemap();
 
   const isReady =
-    Boolean(imageBounds) && !isGridLoading && !settingsLoading && Boolean(gridData);
+    Boolean(imageBounds) && !isBattlemapLoading && Boolean(currentBattlemap);
 
   useEffect(() => {
     onReadyChange?.(isReady);
@@ -56,43 +57,51 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
     };
   }, [onReadyChange]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    let isActive = true;
+  const gridScale = currentBattlemap?.gridScale ?? 1;
+  const gridOffsetX = currentBattlemap?.gridOffsetX ?? 0;
+  const gridOffsetY = currentBattlemap?.gridOffsetY ?? 0;
 
-    setIsGridLoading(true);
+  const effectiveGridData = currentBattlemap?.gridData ?? DEFAULT_GRID_DATA;
 
-    const loadGridlines = async () => {
-      try {
-        const data = await fetchGridData(controller.signal);
-        if (!isActive) {
-          return;
-        }
-        setGridData(data);
-        setIsGridLoading(false);
-      } catch (error) {
-        if (!isActive) {
-          return;
-        }
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        console.error("Error fetching gridlines:", error);
-        setGridData(DEFAULT_GRID_DATA);
-        setIsGridLoading(false);
-      }
-    };
+  const handleGridScaleChange = useCallback(
+    (value: number) => {
+      updateBattlemapSettings({
+        gridScale: value,
+      });
+    },
+    [updateBattlemapSettings]
+  );
 
-    loadGridlines();
+  const handleGridOffsetChange = useCallback(
+    (x: number, y: number) => {
+      updateBattlemapSettings({
+        gridOffsetX: x,
+        gridOffsetY: y,
+      });
+    },
+    [updateBattlemapSettings]
+  );
 
-    return () => {
-      isActive = false;
-      controller.abort();
-    };
-  }, []);
+  const handleCoverPositionUpdate = useCallback(
+    (id: string, x: number, y: number) => {
+      updateCover(id, { x, y });
+    },
+    [updateCover]
+  );
 
-  const displaySettings = settings;
-  const effectiveGridData = gridData ?? DEFAULT_GRID_DATA;
+  const handleCoverSizeUpdate = useCallback(
+    (id: string, width: number, height: number, x: number, y: number) => {
+      updateCover(id, { width, height, x, y });
+    },
+    [updateCover]
+  );
+
+  const handleCoverRemove = useCallback(
+    (id: string) => {
+      removeCover(id);
+    },
+    [removeCover]
+  );
 
   // Extract world map dimensions from gridData for coordinate mapping
   const worldMapWidth = effectiveGridData.imageWidth || 0;
@@ -108,7 +117,7 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
 
   // Cover management
-  const covers = useMemo(() => Array.from(socketCovers.values()), [socketCovers]);
+  const covers = useMemo(() => currentBattlemap?.covers ?? [], [currentBattlemap?.covers]);
   const [isSquareToolActive, setIsSquareToolActive] = useState(false);
   const [isSquareToolLocked, setIsSquareToolLocked] = useState(false);
   const [isDrawingSquare, setIsDrawingSquare] = useState(false);
@@ -211,7 +220,7 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
 
       // Only create cover if it has meaningful size (at least 0.5% in each dimension)
       if (width > 0.5 && height > 0.5) {
-        emitAddCover({
+        addCover({
           x: minX,
           y: minY,
           width,
@@ -238,7 +247,7 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
     squareStartPos,
     squareCurrentPos,
     coordinateMapper,
-    emitAddCover,
+    addCover,
     isSquareToolLocked,
     resetSquareDrawing,
   ]);
@@ -297,9 +306,9 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
         position = snapToGridCenter(
           position,
           effectiveGridData,
-          displaySettings.gridScale,
-          displaySettings.gridOffsetX,
-          displaySettings.gridOffsetY
+          gridScale,
+          gridOffsetX,
+          gridOffsetY
         );
       }
 
@@ -325,11 +334,11 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
       onMouseDown={handleMouseDown}
     >
       <SidebarToolbar
-        gridScale={displaySettings.gridScale}
-        onGridScaleChange={setGridScale}
-        gridOffsetX={displaySettings.gridOffsetX}
-        gridOffsetY={displaySettings.gridOffsetY}
-        onGridOffsetChange={setGridOffset}
+        gridScale={gridScale}
+        onGridScaleChange={handleGridScaleChange}
+        gridOffsetX={gridOffsetX}
+        gridOffsetY={gridOffsetY}
+        onGridOffsetChange={handleGridOffsetChange}
         onTokenDragStart={handleTokenDragStart}
         onTokenDragEnd={handleTokenDragEnd}
         onSquareToolToggle={handleSquareToolToggle}
@@ -337,28 +346,24 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
         isSquareToolActive={isSquareToolActive}
         isSquareToolLocked={isSquareToolLocked}
       />
-      <MapImage onLoad={updateBounds} />
+      <MapImage onLoad={updateBounds} src={currentBattlemap?.mapPath ?? undefined} />
       <CoverManager
         covers={covers}
         imageBounds={imageBounds}
         worldMapWidth={worldMapWidth}
         worldMapHeight={worldMapHeight}
         isDraggable
-        onRemoveCover={emitRemoveCover}
-        onPositionUpdate={(id, x, y) => {
-          emitUpdateCover(id, { x, y });
-        }}
-        onSizeUpdate={(id, width, height, x, y) => {
-          emitUpdateCover(id, { width, height, x, y });
-        }}
+        onRemoveCover={handleCoverRemove}
+        onPositionUpdate={handleCoverPositionUpdate}
+        onSizeUpdate={handleCoverSizeUpdate}
       />
-      {imageBounds && !isGridLoading && !settingsLoading && gridData && (
+      {imageBounds && currentBattlemap && (
         <GridLines
           gridData={effectiveGridData}
           imageBounds={imageBounds}
-          gridScale={displaySettings.gridScale}
-          gridOffsetX={displaySettings.gridOffsetX}
-          gridOffsetY={displaySettings.gridOffsetY}
+          gridScale={gridScale}
+          gridOffsetX={gridOffsetX}
+          gridOffsetY={gridOffsetY}
         />
       )}
       <TokenManager
@@ -368,9 +373,9 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
         worldMapWidth={worldMapWidth}
         worldMapHeight={worldMapHeight}
         gridData={effectiveGridData}
-        gridScale={displaySettings.gridScale}
-        gridOffsetX={displaySettings.gridOffsetX}
-        gridOffsetY={displaySettings.gridOffsetY}
+        gridScale={gridScale}
+        gridOffsetX={gridOffsetX}
+        gridOffsetY={gridOffsetY}
         isMounted={true}
         isDisplay={true}
         myUserId={myUserId}

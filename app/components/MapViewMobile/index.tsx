@@ -5,7 +5,6 @@ import { useSocket } from "../../hooks/useSocket";
 import { useImageBounds } from "../../hooks/useImageBounds";
 import { useViewMode } from "../../hooks/useViewMode";
 import { useCoordinateMapper } from "../../hooks/useCoordinateMapper";
-import { useSettings } from "../../hooks/useSettings";
 import { MapImage } from "../MapImage";
 import { DraggableToken } from "../DraggableToken";
 import { TokenManager } from "../TokenManager";
@@ -17,7 +16,8 @@ import { useAutoCenter } from "./hooks/useAutoCenter";
 import { useTransform } from "./hooks/useTransform";
 import { useHammerGestures } from "./hooks/useHammerGestures";
 import { TransformConfig } from "./types";
-import { DEFAULT_GRID_DATA, GridData, fetchGridData } from "../../utils/gridData";
+import { DEFAULT_GRID_DATA } from "../../utils/gridData";
+import { useBattlemap } from "../../providers/BattlemapProvider";
 
 interface MapViewMobileProps {
   onReadyChange?: (isReady: boolean) => void;
@@ -32,17 +32,14 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     myPosition,
     otherUsers,
     disconnectedUsers,
-    covers: socketCovers,
     updateTokenPosition,
     removeToken,
   } = useSocket(false);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
-  const { settings, isLoading: settingsLoading } = useSettings();
-  const [gridData, setGridData] = React.useState<GridData | null>(null);
-  const [isGridLoading, setIsGridLoading] = React.useState(true);
+  const { currentBattlemap, isBattlemapLoading } = useBattlemap();
 
   const isReady =
-    Boolean(imageBounds) && !isGridLoading && !settingsLoading && Boolean(gridData);
+    Boolean(imageBounds) && !isBattlemapLoading && Boolean(currentBattlemap);
 
   useEffect(() => {
     onReadyChange?.(isReady);
@@ -54,43 +51,11 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     };
   }, [onReadyChange]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    let isActive = true;
+  const gridScale = currentBattlemap?.gridScale ?? 1;
+  const gridOffsetX = currentBattlemap?.gridOffsetX ?? 0;
+  const gridOffsetY = currentBattlemap?.gridOffsetY ?? 0;
 
-    setIsGridLoading(true);
-
-    const fetchGridlines = async () => {
-      try {
-        const data = await fetchGridData(controller.signal);
-        if (!isActive) {
-          return;
-        }
-        setGridData(data);
-        setIsGridLoading(false);
-      } catch (error) {
-        if (!isActive) {
-          return;
-        }
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        console.error("Error fetching gridlines:", error);
-        setGridData(DEFAULT_GRID_DATA);
-        setIsGridLoading(false);
-      }
-    };
-
-    fetchGridlines();
-
-    return () => {
-      isActive = false;
-      controller.abort();
-    };
-  }, []);
-
-  const displaySettings = settings;
-  const effectiveGridData = gridData ?? DEFAULT_GRID_DATA;
+  const effectiveGridData = currentBattlemap?.gridData ?? DEFAULT_GRID_DATA;
 
   // Extract world map dimensions from gridData for coordinate mapping
   const worldMapWidth = effectiveGridData.imageWidth || 0;
@@ -102,7 +67,7 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     worldMapHeight
   );
 
-  const covers = useMemo(() => Array.from(socketCovers.values()), [socketCovers]);
+  const covers = useMemo(() => currentBattlemap?.covers ?? [], [currentBattlemap?.covers]);
 
   // Pan and zoom state
   const {
@@ -279,20 +244,20 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
       }}
     >
       <div style={mapWrapperStyle}>
-        <MapImage onLoad={updateBounds} />
+        <MapImage onLoad={updateBounds} src={currentBattlemap?.mapPath ?? undefined} />
         <CoverManager
           covers={covers}
           imageBounds={imageBounds}
           worldMapWidth={worldMapWidth}
           worldMapHeight={worldMapHeight}
         />
-        {imageBounds && !isGridLoading && !settingsLoading && gridData && (
+        {imageBounds && currentBattlemap && (
           <GridLines
             gridData={effectiveGridData}
             imageBounds={imageBounds}
-            gridScale={displaySettings.gridScale}
-            gridOffsetX={displaySettings.gridOffsetX}
-            gridOffsetY={displaySettings.gridOffsetY}
+            gridScale={gridScale}
+            gridOffsetX={gridOffsetX}
+            gridOffsetY={gridOffsetY}
           />
         )}
         {imageBounds && myUserId && (
@@ -305,9 +270,9 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
               worldMapWidth={worldMapWidth}
               worldMapHeight={worldMapHeight}
               gridData={effectiveGridData}
-              gridScale={displaySettings.gridScale}
-              gridOffsetX={displaySettings.gridOffsetX}
-              gridOffsetY={displaySettings.gridOffsetY}
+              gridScale={gridScale}
+              gridOffsetX={gridOffsetX}
+              gridOffsetY={gridOffsetY}
               isMounted={isMounted}
               onPositionUpdate={updateTokenPosition}
               transform={transform as TransformConfig}
@@ -323,9 +288,9 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
           worldMapWidth={worldMapWidth}
           worldMapHeight={worldMapHeight}
           gridData={effectiveGridData}
-          gridScale={displaySettings.gridScale}
-          gridOffsetX={displaySettings.gridOffsetX}
-          gridOffsetY={displaySettings.gridOffsetY}
+          gridScale={gridScale}
+          gridOffsetX={gridOffsetX}
+          gridOffsetY={gridOffsetY}
           isMounted={isMounted}
           isDisplay={false}
           myUserId={myUserId}

@@ -32,8 +32,40 @@ export const sanitizeGridData = (input: unknown): GridData => {
   };
 };
 
-export const fetchGridData = async (signal?: AbortSignal): Promise<GridData> => {
-  const response = await fetch("/api/gridlines", { signal });
+export const hasGridData = (gridData: GridData | null | undefined): boolean => {
+  if (!gridData) {
+    return false;
+  }
+
+  const hasVertical = Array.isArray(gridData.verticalLines) && gridData.verticalLines.length > 0;
+  const hasHorizontal =
+    Array.isArray(gridData.horizontalLines) && gridData.horizontalLines.length > 0;
+  const hasDimensions =
+    typeof gridData.imageWidth === "number" &&
+    gridData.imageWidth > 0 &&
+    typeof gridData.imageHeight === "number" &&
+    gridData.imageHeight > 0;
+
+  return hasVertical && hasHorizontal && hasDimensions;
+};
+
+interface FetchGridDataOptions {
+  mapPath?: string | null;
+  signal?: AbortSignal;
+}
+
+export const fetchGridData = async (
+  options: FetchGridDataOptions = {}
+): Promise<GridData> => {
+  const params = new URLSearchParams();
+  if (options.mapPath) {
+    params.set("path", options.mapPath);
+  }
+
+  const query = params.toString();
+  const response = await fetch(`/api/gridlines${query ? `?${query}` : ""}`, {
+    signal: options.signal,
+  });
   if (!response.ok) {
     throw new Error("Failed to fetch gridlines");
   }

@@ -1,32 +1,40 @@
 import Image from "next/image";
+import { DEFAULT_BATTLEMAP_MAP_PATH } from "../../lib/defaultBattlemap";
 
 interface MapImageProps {
   onLoad?: () => void;
   scale?: number;
   translateX?: number;
   translateY?: number;
+  src?: string | null;
 }
 
-export const MapImage = ({ 
-  onLoad, 
-  scale = 1, 
-  translateX = 0, 
-  translateY = 0 
+export const MapImage = ({
+  onLoad,
+  scale = 1,
+  translateX = 0,
+  translateY = 0,
+  src,
 }: MapImageProps) => {
-  const transform = scale !== 1 || translateX !== 0 || translateY !== 0
-    ? `scale(${scale}) translate(${translateX}px, ${translateY}px)`
-    : undefined;
+  const transform =
+    scale !== 1 || translateX !== 0 || translateY !== 0
+      ? `scale(${scale}) translate(${translateX}px, ${translateY}px)`
+      : undefined;
+
+  const resolvedSrc =
+    typeof src === "string" && src.trim().length > 0 ? src : DEFAULT_BATTLEMAP_MAP_PATH;
 
   return (
     <Image
-      src="/maps/city-assault-30-x-50-phased-v0-87llyi5jgauf1.png"
-      alt="City Assault Map"
+      src={resolvedSrc}
+      alt="Battlemap"
       fill
+      unoptimized
       className="object-contain pointer-events-none"
-      style={{ 
+      style={{
         opacity: 1,
         transform,
-        transformOrigin: 'center center',
+        transformOrigin: "center center",
       }}
       priority
       onLoad={onLoad}

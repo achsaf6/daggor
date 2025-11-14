@@ -2,11 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
 import { join } from 'path';
 import { readFileSync } from 'fs';
+import { DEFAULT_BATTLEMAP_MAP_PATH } from '../../../lib/defaultBattlemap';
 
-interface GridLine {
-  type: 'vertical' | 'horizontal';
-  position: number; // Position in pixels (0-1 normalized or absolute)
-}
+export const runtime = "nodejs";
 
 interface GridData {
   verticalLines: number[];
@@ -18,10 +16,7 @@ interface GridData {
 /**
  * Detect vertical and horizontal lines in an image using edge detection
  */
-async function detectGridLines(imagePath: string): Promise<GridData> {
-  // Read the image
-  const imageBuffer = readFileSync(imagePath);
-  
+async function detectGridLines(imageBuffer: Buffer): Promise<GridData> {
   // Get image metadata
   const metadata = await sharp(imageBuffer).metadata();
   const width = metadata.width!;
@@ -256,12 +251,27 @@ const defaultGridData: GridData = {
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const mapName = searchParams.get('map') || 'city-assault-30-x-50-phased-v0-87llyi5jgauf1.png';
-    
-    // Construct path to the map image
-    const imagePath = join(process.cwd(), 'public', 'maps', mapName);
+    const requestedPath = searchParams.get('path');
 
-    const gridData = await detectGridLines(imagePath);
+    let imageBuffer: Buffer;
+    if (requestedPath && requestedPath.startsWith('http')) {
+      const response = await fetch(requestedPath);
+      if (!response.ok) {
+        throw new Error('Failed to fetch remote map image');
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      imageBuffer = Buffer.from(arrayBuffer);
+    } else {
+      const defaultPath = DEFAULT_BATTLEMAP_MAP_PATH.replace(/^\/+/, '');
+      const relativePath =
+        requestedPath && requestedPath.trim().length > 0
+          ? requestedPath.replace(/^\/+/, '')
+          : defaultPath;
+      const imagePath = join(process.cwd(), 'public', relativePath);
+      imageBuffer = readFileSync(imagePath);
+    }
+
+    const gridData = await detectGridLines(imageBuffer);
 
     return NextResponse.json(gridData);
   } catch (error) {
