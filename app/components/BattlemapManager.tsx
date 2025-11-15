@@ -20,7 +20,6 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
     renameBattlemap,
     updateBattlemapMapPath,
     createBattlemap,
-    deleteBattlemap,
   } = useBattlemap();
 
   const [nameValue, setNameValue] = useState<string>(currentBattlemap?.name ?? "");
@@ -115,21 +114,6 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
     }
   };
 
-  const handleDeleteBattlemap = async () => {
-    if (!currentBattlemap) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Delete "${currentBattlemap.name}" and all of its covers?`
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setStatusMessage("Deleting battlemap…");
-    await deleteBattlemap(currentBattlemap.id);
-  };
 
   const availableBattlemaps = useMemo(() => {
     if (isListLoading) {
@@ -257,17 +241,6 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
           Create Battlemap
         </button>
       </form>
-
-      {currentBattlemap ? (
-        <button
-          type="button"
-          onClick={handleDeleteBattlemap}
-          disabled={disabled}
-          className="w-full bg-red-900/40 hover:bg-red-900/60 border border-red-500/40 rounded-md px-2 py-2 text-white text-sm font-medium transition disabled:opacity-50"
-        >
-          Delete Battlemap
-        </button>
-      ) : null}
 
       {statusMessage ? (
         <div className="text-xs text-white/50">{statusMessage}</div>

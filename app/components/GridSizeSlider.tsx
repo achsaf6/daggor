@@ -11,14 +11,14 @@ interface GridSizeSliderProps {
 export const GridSizeSlider = ({
   value,
   onChange,
-  min = 0.1,
-  max = 10.0,
-  step = 0.1,
+  min = 0.01,
+  max = 10.00,
+  step = 0.01,
 }: GridSizeSliderProps) => {
   return (
     <div>
       <label className="block text-white text-sm font-medium mb-2">
-        Grid Size: {value.toFixed(1)}x
+        Grid Size: {value.toFixed(2)}x
       </label>
       <input
         type="range"

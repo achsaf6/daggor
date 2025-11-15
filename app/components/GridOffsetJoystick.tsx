@@ -15,7 +15,7 @@ export const GridOffsetJoystick = ({
   offsetY,
   onChange,
   maxOffset = 100,
-  stepSize = 1,
+  stepSize = 0.01,
 }: GridOffsetJoystickProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const joystickRef = useRef<HTMLDivElement>(null);

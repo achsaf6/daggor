@@ -65,7 +65,7 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
-        className={`bg-black/80 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-white/20 text-white hover:bg-black/90 transition-all ${
+        className={`relative rounded-md p-3 text-white hover:bg-black/90 transition-all ${
           isOpen ? "bg-black/90" : ""
         }`}
         aria-label="Add Token"
@@ -78,12 +78,10 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
           stroke="currentColor"
           strokeWidth={2}
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M12 4v16m8-8H4"
-          />
+          <circle cx="12" cy="12" r="10" />
         </svg>
+        {/* Dropdown indicator triangle */}
+        <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-white/60" />
       </button>
 
       {/* Token Picker Dropdown */}

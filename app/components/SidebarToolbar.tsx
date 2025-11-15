@@ -69,7 +69,7 @@ export const SidebarToolbar = ({
   return (
     <div
       ref={toolbarRef}
-      className="fixed left-4 top-1/4 -translate-y-1/2 z-50 flex flex-col gap-2"
+      className="fixed left-4 top-1/4 -translate-y-1/2 z-50 bg-black/80 backdrop-blur-sm rounded-lg shadow-lg border border-white/20 flex flex-col p-1 gap-1"
     >
       {/* Settings Button with Gear Icon */}
       <div className="relative">
@@ -78,7 +78,7 @@ export const SidebarToolbar = ({
             e.stopPropagation();
             setIsSettingsOpen(!isSettingsOpen);
           }}
-          className={`bg-black/80 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-white/20 text-white hover:bg-black/90 transition-all ${
+          className={`relative rounded-md p-3 text-white hover:bg-black/90 transition-all ${
             isSettingsOpen ? "bg-black/90" : ""
           }`}
           aria-label="Settings"
@@ -102,6 +102,8 @@ export const SidebarToolbar = ({
               d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
             />
           </svg>
+          {/* Dropdown indicator triangle */}
+          <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-white/60" />
         </button>
 
         {/* Settings Dropdown */}
@@ -128,7 +130,7 @@ export const SidebarToolbar = ({
               setIsSettingsOpen(false);
             }
           }}
-          className={`bg-black/80 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-white/20 text-white hover:bg-black/90 transition-all ${
+          className={`relative rounded-md p-3 text-white hover:bg-black/90 transition-all ${
             isMapManagerOpen ? "bg-black/90" : ""
           }`}
           aria-label="Battlemap Manager"
@@ -152,6 +154,8 @@ export const SidebarToolbar = ({
               d="M9 4v13m6-10v13"
             />
           </svg>
+          {/* Dropdown indicator triangle */}
+          <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-white/60" />
         </button>
 
         {isMapManagerOpen && (
@@ -162,7 +166,9 @@ export const SidebarToolbar = ({
       </div>
 
       {/* Token Picker */}
-      <TokenPicker onTokenDragStart={onTokenDragStart} onTokenDragEnd={onTokenDragEnd} />
+      <div className="relative">
+        <TokenPicker onTokenDragStart={onTokenDragStart} onTokenDragEnd={onTokenDragEnd} />
+      </div>
 
       {/* Square Cover Tool */}
       <button
@@ -226,12 +232,12 @@ export const SidebarToolbar = ({
           e.preventDefault();
           e.stopPropagation();
         }}
-        className={`backdrop-blur-sm rounded-lg p-3 shadow-lg border text-white transition-all ${
+        className={`rounded-md p-3 text-white transition-all ${
           isSquareToolActive
             ? isSquareToolLocked
-              ? "bg-blue-700/90 border-blue-500 hover:bg-blue-800/90"
-              : "bg-blue-600/90 border-blue-400 hover:bg-blue-700/90"
-            : "bg-black/80 border-white/20 hover:bg-black/90"
+              ? "bg-red-700/90 hover:bg-red-800/90"
+              : "bg-red-600/90 hover:bg-red-700/90"
+            : "hover:bg-black/90"
         }`}
         aria-label="Square Cover Tool"
         title={

@@ -252,7 +252,7 @@ export const DraggableCover = ({
       data-cover
       className={`absolute border-2 pointer-events-auto transition-colors ${
         isDragging || isResizing
-          ? "border-blue-400 cursor-grabbing"
+          ? "border-red-500 cursor-grabbing"
           : "border-gray-400 cursor-move hover:border-gray-300"
       }`}
       style={{
