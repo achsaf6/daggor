@@ -134,6 +134,17 @@ const sanitizeCoverInput = (input: Partial<Cover> & { id: string }): Cover => {
   };
 };
 
+const hasBattlemapPayload = (value: unknown): value is { battlemap?: BattlemapPayload | null } =>
+  typeof value === "object" && value !== null && "battlemap" in value;
+
+const extractBattlemapId = (value: unknown): string | null => {
+  if (typeof value === "object" && value !== null && "battlemapId" in value) {
+    const id = (value as { battlemapId?: unknown }).battlemapId;
+    return typeof id === "string" ? id : null;
+  }
+  return null;
+};
+
 const normalizeBattlemapPayload = (payload: BattlemapPayload): BattlemapData => {
   const gridData = sanitizeGridData(payload.gridData);
   const covers: Cover[] = Array.isArray(payload.covers)
@@ -304,7 +315,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       setError(null);
       try {
         const response = await emitWithAck("battlemap:get", { battlemapId });
-        if (response?.battlemap) {
+        if (hasBattlemapPayload(response) && response.battlemap) {
           const normalized = normalizeBattlemapPayload(response.battlemap as BattlemapPayload);
           debugLog("battlemap:get success", battlemapId, normalized.name);
           setCurrentBattlemap(normalized);
@@ -477,7 +488,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
           mapPath: normalizedMapPath,
         });
 
-        const newBattlemapId = response?.battlemapId;
+        const newBattlemapId = extractBattlemapId(response);
         if (typeof newBattlemapId === "string") {
           setCurrentBattlemapId(newBattlemapId);
           await requestBattlemap(newBattlemapId);
