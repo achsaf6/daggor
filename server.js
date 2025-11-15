@@ -1,7 +1,15 @@
- import 'dotenv/config';
+import 'dotenv/config';
 import { createServer } from 'http';
+import { randomUUID } from 'crypto';
 import { Server } from 'socket.io';
 import next from 'next';
+import { getSupabaseServerClient } from './lib/supabaseServer.js';
+import {
+  DEFAULT_BATTLEMAP_NAME,
+  DEFAULT_BATTLEMAP_MAP_PATH,
+  DEFAULT_BATTLEMAP_GRID_DATA,
+  createDefaultGridData,
+} from './lib/defaultBattlemap.js';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
@@ -9,6 +17,203 @@ const port = parseInt(process.env.PORT || '3000', 10);
 
 const app = next({ dev, hostname, port });
 const handler = app.getRequestHandler();
+
+const supabase = getSupabaseServerClient();
+
+const DEFAULT_SETTINGS = {
+  gridScale: 1,
+  gridOffsetX: 0,
+  gridOffsetY: 0,
+};
+
+const battlemapState = {
+  order: [],
+  maps: new Map(),
+  activeBattlemapId: null,
+};
+
+const getDefaultBattlemapId = () => {
+  for (const id of battlemapState.order) {
+    const battlemap = battlemapState.maps.get(id);
+    if (battlemap && battlemap.mapPath === DEFAULT_BATTLEMAP_MAP_PATH) {
+      return id;
+    }
+  }
+  return null;
+};
+
+const sanitizeGridData = (input) => {
+  const fallback = createDefaultGridData();
+
+  if (!input || typeof input !== 'object') {
+    return fallback;
+  }
+
+  const candidate = input;
+  const verticalLines =
+    Array.isArray(candidate.verticalLines) && candidate.verticalLines.length > 0
+      ? [...candidate.verticalLines]
+      : [...fallback.verticalLines];
+  const horizontalLines =
+    Array.isArray(candidate.horizontalLines) && candidate.horizontalLines.length > 0
+      ? [...candidate.horizontalLines]
+      : [...fallback.horizontalLines];
+  const imageWidth =
+    typeof candidate.imageWidth === 'number' && candidate.imageWidth > 0
+      ? candidate.imageWidth
+      : fallback.imageWidth;
+  const imageHeight =
+    typeof candidate.imageHeight === 'number' && candidate.imageHeight > 0
+      ? candidate.imageHeight
+      : fallback.imageHeight;
+
+  return {
+    verticalLines,
+    horizontalLines,
+    imageWidth,
+    imageHeight,
+  };
+};
+
+const cloneGridData = (gridData = DEFAULT_BATTLEMAP_GRID_DATA) => sanitizeGridData(gridData);
+
+const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const sanitizeCover = (input) => {
+  const width = clampValue(typeof input.width === 'number' ? input.width : 0, 0, 100);
+  const height = clampValue(typeof input.height === 'number' ? input.height : 0, 0, 100);
+  const maxX = 100 - width;
+  const maxY = 100 - height;
+
+  return {
+    id: input.id,
+    width,
+    height,
+    x: clampValue(typeof input.x === 'number' ? input.x : 0, 0, maxX),
+    y: clampValue(typeof input.y === 'number' ? input.y : 0, 0, maxY),
+    color: typeof input.color === 'string' && input.color.trim() !== '' ? input.color : '#808080',
+  };
+};
+
+const generateCoverId = () => `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+
+const serializeBattlemapSummary = (battlemap) => ({
+  id: battlemap.id,
+  name: battlemap.name,
+  mapPath: battlemap.mapPath,
+});
+
+const serializeBattlemap = (battlemap) => ({
+  id: battlemap.id,
+  name: battlemap.name,
+  mapPath: battlemap.mapPath,
+  gridScale: battlemap.gridScale,
+  gridOffsetX: battlemap.gridOffsetX,
+  gridOffsetY: battlemap.gridOffsetY,
+  gridData: battlemap.gridData,
+  covers: Array.from(battlemap.covers.values()),
+});
+
+const logEvent = (...args) => {
+  console.log('[Battlemap]', ...args);
+};
+
+const loadBattlemapStateFromSupabase = async () => {
+  logEvent('Loading battlemaps from Supabase…');
+  let { data: battlemapRows, error } = await supabase
+    .from('battlemaps')
+    .select(
+      `
+        id,
+        name,
+        map_path,
+        grid_scale,
+        grid_offset_x,
+        grid_offset_y,
+        grid_data
+      `
+    )
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  if (!battlemapRows || battlemapRows.length === 0) {
+    const { data: created, error: seedError } = await supabase
+      .from('battlemaps')
+      .insert({
+        name: DEFAULT_BATTLEMAP_NAME,
+        map_path: DEFAULT_BATTLEMAP_MAP_PATH,
+        grid_scale: DEFAULT_SETTINGS.gridScale,
+        grid_offset_x: DEFAULT_SETTINGS.gridOffsetX,
+        grid_offset_y: DEFAULT_SETTINGS.gridOffsetY,
+        grid_data: DEFAULT_BATTLEMAP_GRID_DATA,
+      })
+      .select(
+        `
+          id,
+          name,
+          map_path,
+          grid_scale,
+          grid_offset_x,
+          grid_offset_y,
+          grid_data
+        `
+      )
+      .single();
+
+    if (seedError) {
+      throw seedError;
+    }
+
+    battlemapRows = created ? [created] : [];
+  }
+
+  const { data: coverRows, error: coverError } = await supabase
+    .from('battlemap_covers')
+    .select('id, battlemap_id, x, y, width, height, color');
+
+  if (coverError) {
+    throw coverError;
+  }
+
+  battlemapState.order = [];
+  battlemapState.maps.clear();
+
+  for (const row of battlemapRows) {
+    battlemapState.order.push(row.id);
+    battlemapState.maps.set(row.id, {
+      id: row.id,
+      name: row.name ?? DEFAULT_BATTLEMAP_NAME,
+      mapPath: row.map_path ?? null,
+      gridScale: typeof row.grid_scale === 'number' ? row.grid_scale : DEFAULT_SETTINGS.gridScale,
+      gridOffsetX:
+        typeof row.grid_offset_x === 'number' ? row.grid_offset_x : DEFAULT_SETTINGS.gridOffsetX,
+      gridOffsetY:
+        typeof row.grid_offset_y === 'number' ? row.grid_offset_y : DEFAULT_SETTINGS.gridOffsetY,
+      gridData: sanitizeGridData(row.grid_data),
+      covers: new Map(),
+    });
+  }
+
+  for (const cover of coverRows || []) {
+    const parent = battlemapState.maps.get(cover.battlemap_id);
+    if (!parent) {
+      continue;
+    }
+    parent.covers.set(cover.id, sanitizeCover({ ...cover, id: cover.id }));
+  }
+
+  logEvent(
+    `Loaded ${battlemapState.order.length} battlemaps`,
+    `(${coverRows?.length ?? 0} covers)`
+  );
+
+  battlemapState.activeBattlemapId =
+    getDefaultBattlemapId() ?? battlemapState.order[0] ?? null;
+  logEvent('Initial active battlemap', battlemapState.activeBattlemapId ?? 'none');
+};
 
 // Store connected users (in-memory)
 const users = new Map();
@@ -36,12 +241,115 @@ function getRandomColor() {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
+  try {
+    await loadBattlemapStateFromSupabase();
+  } catch (error) {
+    console.error('Failed to load battlemap state from Supabase', error);
+    process.exit(1);
+  }
   // Create HTTP server with Next.js handler
   const httpServer = createServer(handler);
   
   // Create Socket.IO server
   const io = new Server(httpServer);
+
+  const runBackgroundTask = (description, task) => {
+    setImmediate(() => {
+      Promise.resolve()
+        .then(task)
+        .catch((err) => {
+          console.error(`[Battlemap Persistence] ${description} failed`, err);
+        });
+    });
+  };
+
+  const broadcastBattlemapList = () => {
+    const summaries = battlemapState.order
+      .map((id) => battlemapState.maps.get(id))
+      .filter(Boolean)
+      .map((battlemap) => serializeBattlemapSummary(battlemap));
+    logEvent('Broadcasting battlemap list', summaries.map((item) => item.id));
+    io.emit('battlemap:list', summaries);
+  };
+
+  const broadcastActiveBattlemap = () => {
+    logEvent('Broadcasting active battlemap', battlemapState.activeBattlemapId ?? 'none');
+    io.emit('battlemap:active', { battlemapId: battlemapState.activeBattlemapId });
+  };
+
+  const ensureActiveBattlemap = () => {
+    if (
+      battlemapState.activeBattlemapId &&
+      battlemapState.maps.has(battlemapState.activeBattlemapId)
+    ) {
+      return;
+    }
+    battlemapState.activeBattlemapId =
+      getDefaultBattlemapId() ?? battlemapState.order[0] ?? null;
+  };
+
+  const emitBattlemapUpdate = (battlemapId) => {
+    const battlemap = battlemapState.maps.get(battlemapId);
+    if (!battlemap) {
+      return;
+    }
+    io.emit('battlemap:updated', serializeBattlemap(battlemap));
+  };
+
+  const emitBattlemapDeleted = (battlemapId) => {
+    io.emit('battlemap:deleted', { battlemapId });
+  };
+
+  const insertBattlemapRow = (battlemap) =>
+    supabase.from('battlemaps').insert({
+      id: battlemap.id,
+      name: battlemap.name,
+      map_path: battlemap.mapPath,
+      grid_scale: battlemap.gridScale,
+      grid_offset_x: battlemap.gridOffsetX,
+      grid_offset_y: battlemap.gridOffsetY,
+      grid_data: battlemap.gridData,
+    });
+
+  const updateBattlemapRow = (battlemapId) => {
+    const battlemap = battlemapState.maps.get(battlemapId);
+    if (!battlemap) {
+      return Promise.resolve();
+    }
+
+    return supabase
+      .from('battlemaps')
+      .update({
+        name: battlemap.name,
+        map_path: battlemap.mapPath,
+        grid_scale: battlemap.gridScale,
+        grid_offset_x: battlemap.gridOffsetX,
+        grid_offset_y: battlemap.gridOffsetY,
+        grid_data: battlemap.gridData,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', battlemapId);
+  };
+
+  const deleteBattlemapRow = (battlemapId) =>
+    supabase.from('battlemaps').delete().eq('id', battlemapId);
+
+  const deleteCoversForBattlemap = (battlemapId) =>
+    supabase.from('battlemap_covers').delete().eq('battlemap_id', battlemapId);
+
+  const upsertCoverRow = (battlemapId, cover) =>
+    supabase.from('battlemap_covers').upsert({
+      id: cover.id,
+      battlemap_id: battlemapId,
+      x: cover.x,
+      y: cover.y,
+      width: cover.width,
+      height: cover.height,
+      color: cover.color,
+    });
+
+  const deleteCoverRow = (coverId) => supabase.from('battlemap_covers').delete().eq('id', coverId);
 
   // Store display mode users separately (they're not in the users Map)
   const displayModeUsers = new Map(); // socketId -> userData
@@ -50,6 +358,59 @@ app.prepare().then(() => {
     const userId = socket.id;
     let userData = null;
     let identificationReceived = false;
+
+    const respond = (ack, payload) => {
+      if (typeof ack === 'function') {
+        ack(payload);
+      }
+    };
+
+    const getBattlemapOrRespond = (battlemapId, ack) => {
+      if (!battlemapId || typeof battlemapId !== 'string') {
+        respond(ack, { ok: false, error: 'invalid-battlemap-id' });
+        return null;
+      }
+      const battlemap = battlemapState.maps.get(battlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'battlemap-not-found' });
+        return null;
+      }
+      return battlemap;
+    };
+
+    const ensureBattlemapMutator = (eventName, ack) => {
+      if (!userData || !userData.allowBattlemapMutations) {
+        logEvent(
+          'Denied battlemap mutation',
+          eventName,
+          'from socket',
+          userId,
+          'isDisplay=',
+          userData?.isDisplay
+        );
+        respond(ack, { ok: false, error: 'forbidden' });
+        return false;
+      }
+      return true;
+    };
+
+    const sendBattlemapList = () => {
+      const summaries = battlemapState.order
+        .map((id) => battlemapState.maps.get(id))
+        .filter(Boolean)
+        .map((battlemap) => serializeBattlemapSummary(battlemap));
+      logEvent('Sending battlemap list to socket', userId, summaries.map((item) => item.id));
+      socket.emit('battlemap:list', summaries);
+    };
+
+    const sendActiveBattlemap = () => {
+      ensureActiveBattlemap();
+       logEvent('Sending active battlemap to socket', userId, battlemapState.activeBattlemapId ?? 'none');
+      socket.emit('battlemap:active', { battlemapId: battlemapState.activeBattlemapId });
+    };
+
+    sendBattlemapList();
+    sendActiveBattlemap();
 
     // Function to initialize user
     const initializeUser = (data) => {
@@ -73,6 +434,11 @@ app.prepare().then(() => {
       const position = restoredUserData?.position || { x: 50, y: 50 };
 
       const isDisplay = data?.isDisplay || false;
+      const suppressPresence = Boolean(data?.suppressPresence);
+      const allowBattlemapMutations =
+        typeof data?.allowBattlemapMutations === 'boolean'
+          ? data.allowBattlemapMutations
+          : isDisplay;
 
       userData = {
         id: userId,
@@ -80,7 +446,13 @@ app.prepare().then(() => {
         color,
         position,
         isDisplay, // Track if this is a display mode user
+        allowBattlemapMutations,
+        suppressPresence,
       };
+
+      if (suppressPresence) {
+        return;
+      }
 
       // Only add to users Map if NOT in display mode
       // Display mode users should not be visible to other users
@@ -139,7 +511,10 @@ app.prepare().then(() => {
     };
 
     // Listen for user identification
-    socket.once('user-identify', initializeUser);
+    socket.once('user-identify', (data) => {
+      logEvent('Socket identified', socket.id, JSON.stringify(data));
+      initializeUser(data);
+    });
 
     // If client doesn't send identification within 1 second, proceed with new user
     setTimeout(() => {
@@ -147,6 +522,288 @@ app.prepare().then(() => {
         initializeUser({});
       }
     }, 1000);
+
+    socket.on('battlemap:get', (payload, ack) => {
+      const battlemapId = payload?.battlemapId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+      logEvent('Client requested battlemap', battlemapId);
+      respond(ack, { ok: true, battlemap: serializeBattlemap(battlemap) });
+    });
+
+    socket.on('battlemap:create', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:create', ack)) {
+        return;
+      }
+
+      const trimmedName =
+        typeof payload?.name === 'string' && payload.name.trim() !== ''
+          ? payload.name.trim()
+          : 'Untitled Battlemap';
+      const sanitizedPath =
+        typeof payload?.mapPath === 'string' && payload.mapPath.trim() !== ''
+          ? payload.mapPath.trim()
+          : null;
+      const battlemapId = randomUUID();
+
+      const newBattlemap = {
+        id: battlemapId,
+        name: trimmedName,
+        mapPath: sanitizedPath,
+        gridScale: DEFAULT_SETTINGS.gridScale,
+        gridOffsetX: DEFAULT_SETTINGS.gridOffsetX,
+        gridOffsetY: DEFAULT_SETTINGS.gridOffsetY,
+        gridData: cloneGridData(),
+        covers: new Map(),
+      };
+
+      battlemapState.order.push(battlemapId);
+      battlemapState.maps.set(battlemapId, newBattlemap);
+
+      logEvent('Created battlemap', battlemapId, `"${trimmedName}"`);
+      respond(ack, { ok: true, battlemapId });
+      broadcastBattlemapList();
+      if (!battlemapState.activeBattlemapId) {
+        battlemapState.activeBattlemapId = battlemapId;
+        broadcastActiveBattlemap();
+      }
+      emitBattlemapUpdate(battlemapId);
+
+      runBackgroundTask('insert battlemap', () => insertBattlemapRow(newBattlemap));
+    });
+
+    socket.on('battlemap:set-active', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:set-active', ack)) {
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      if (!battlemapId || !battlemapState.maps.has(battlemapId)) {
+        respond(ack, { ok: false, error: 'battlemap-not-found' });
+        return;
+      }
+
+      if (battlemapState.activeBattlemapId !== battlemapId) {
+        battlemapState.activeBattlemapId = battlemapId;
+        logEvent('Active battlemap set to', battlemapId);
+        broadcastActiveBattlemap();
+      }
+
+      respond(ack, { ok: true });
+    });
+
+    socket.on('battlemap:rename', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:rename', ack)) {
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      const trimmedName =
+        typeof payload?.name === 'string' && payload.name.trim() !== ''
+          ? payload.name.trim()
+          : 'Untitled Battlemap';
+
+      battlemap.name = trimmedName;
+
+      logEvent('Renamed battlemap', battlemap.id, '→', `"${trimmedName}"`);
+      respond(ack, { ok: true });
+      broadcastBattlemapList();
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('update battlemap name', () => updateBattlemapRow(battlemap.id));
+    });
+
+    socket.on('battlemap:update-map-path', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:update-map-path', ack)) {
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      logEvent('Received map path update request for', battlemapId, 'from', userId);
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      const sanitizedPath =
+        typeof payload?.mapPath === 'string' && payload.mapPath.trim() !== ''
+          ? payload.mapPath.trim()
+          : null;
+
+      battlemap.mapPath = sanitizedPath;
+      battlemap.gridData = cloneGridData();
+
+      logEvent('Updated map path for', battlemap.id, '→', sanitizedPath ?? '(none)');
+      respond(ack, { ok: true });
+      broadcastBattlemapList();
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('update battlemap map path', () => updateBattlemapRow(battlemap.id));
+    });
+
+    socket.on('battlemap:update-settings', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:update-settings', ack)) {
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      if (typeof payload?.gridScale === 'number' && Number.isFinite(payload.gridScale)) {
+        battlemap.gridScale = payload.gridScale;
+      }
+
+      if (typeof payload?.gridOffsetX === 'number' && Number.isFinite(payload.gridOffsetX)) {
+        battlemap.gridOffsetX = payload.gridOffsetX;
+      }
+
+      if (typeof payload?.gridOffsetY === 'number' && Number.isFinite(payload.gridOffsetY)) {
+        battlemap.gridOffsetY = payload.gridOffsetY;
+      }
+
+      logEvent('Updated grid settings for', battlemap.id, {
+        scale: battlemap.gridScale,
+        offsetX: battlemap.gridOffsetX,
+        offsetY: battlemap.gridOffsetY,
+      });
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('update battlemap settings', () => updateBattlemapRow(battlemap.id));
+    });
+
+    socket.on('battlemap:update-grid-data', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:update-grid-data', ack)) {
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      battlemap.gridData = sanitizeGridData(payload?.gridData);
+
+      logEvent('Updated grid data for', battlemap.id);
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('update battlemap grid data', () => updateBattlemapRow(battlemap.id));
+    });
+
+    socket.on('battlemap:delete', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:delete', ack)) {
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      battlemapState.maps.delete(battlemap.id);
+      battlemapState.order = battlemapState.order.filter((id) => id !== battlemap.id);
+
+      logEvent('Deleted battlemap', battlemap.id);
+      respond(ack, { ok: true });
+      broadcastBattlemapList();
+      emitBattlemapDeleted(battlemap.id);
+
+      runBackgroundTask('delete battlemap', async () => {
+        await deleteCoversForBattlemap(battlemap.id);
+        await deleteBattlemapRow(battlemap.id);
+      });
+
+      if (battlemapState.activeBattlemapId === battlemap.id) {
+        ensureActiveBattlemap();
+        broadcastActiveBattlemap();
+      }
+    });
+
+    socket.on('battlemap:add-cover', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:add-cover', ack)) {
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      const coverInput = payload?.cover || {};
+      const coverId =
+        typeof coverInput.id === 'string' && coverInput.id.trim() !== ''
+          ? coverInput.id
+          : generateCoverId();
+      const sanitized = sanitizeCover({ ...coverInput, id: coverId });
+      battlemap.covers.set(sanitized.id, sanitized);
+
+      logEvent('Added cover', sanitized.id, 'to', battlemap.id);
+      respond(ack, { ok: true, coverId: sanitized.id });
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('upsert cover', () => upsertCoverRow(battlemap.id, sanitized));
+    });
+
+    socket.on('battlemap:update-cover', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:update-cover', ack)) {
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const coverId = payload?.coverId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      const existing = coverId ? battlemap.covers.get(coverId) : null;
+      if (!existing) {
+        respond(ack, { ok: false, error: 'cover-not-found' });
+        return;
+      }
+
+      const sanitized = sanitizeCover({ ...existing, ...payload?.updates, id: coverId });
+      battlemap.covers.set(sanitized.id, sanitized);
+
+      logEvent('Updated cover', coverId, 'on', battlemap.id);
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('update cover', () => upsertCoverRow(battlemap.id, sanitized));
+    });
+
+    socket.on('battlemap:remove-cover', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:remove-cover', ack)) {
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const coverId = payload?.coverId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      if (!coverId || !battlemap.covers.has(coverId)) {
+        respond(ack, { ok: false, error: 'cover-not-found' });
+        return;
+      }
+
+      battlemap.covers.delete(coverId);
+
+      logEvent('Removed cover', coverId, 'from', battlemap.id);
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('delete cover', () => deleteCoverRow(coverId));
+    });
 
     // Handle position updates
     socket.on('position-update', (data) => {
@@ -211,7 +868,6 @@ app.prepare().then(() => {
     // Handle token removal (only from display mode users)
     socket.on('remove-token', (data) => {
       // Check both regular users and display mode users
-      const user = users.get(userId) || displayModeUsers.get(userId);
       const isDisplayUser = displayModeUsers.has(userId);
       
       if (isDisplayUser && data.persistentUserId) {

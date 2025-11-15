@@ -6,5 +6,11 @@ export declare const DEFAULT_BATTLEMAP_GRID_DATA: {
   imageWidth: number;
   imageHeight: number;
 };
+export declare const createDefaultGridData: () => {
+  verticalLines: number[];
+  horizontalLines: number[];
+  imageWidth: number;
+  imageHeight: number;
+};
 
 

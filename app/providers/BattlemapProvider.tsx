@@ -9,25 +9,20 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { supabase } from "../utils/supabase";
-import {
-  DEFAULT_GRID_DATA,
-  GridData,
-  fetchGridData,
-  hasGridData,
-  sanitizeGridData,
-} from "../utils/gridData";
+import { io, Socket } from "socket.io-client";
+import { useViewMode } from "../hooks/useViewMode";
+import { GridData, sanitizeGridData } from "../utils/gridData";
 import { Cover } from "../types";
-import {
-  DEFAULT_BATTLEMAP_MAP_PATH,
-  DEFAULT_BATTLEMAP_NAME,
-} from "../../lib/defaultBattlemap";
 
 const COVER_DEFAULT_COLOR = "#808080";
-const clampValue = (value: number, min: number, max: number) =>
-  Math.min(Math.max(value, min), max);
-const generateCoverId = () =>
-  `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+const clampValue = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const generateCoverId = () => `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+
+const DEFAULT_SETTINGS = {
+  gridScale: 1,
+  gridOffsetX: 0,
+  gridOffsetY: 0,
+};
 
 interface BattlemapSummary {
   id: string;
@@ -76,23 +71,39 @@ interface BattlemapContextValue {
   removeCover: (id: string) => Promise<void>;
 }
 
+interface BattlemapPayload {
+  id: string;
+  name?: string | null;
+  mapPath?: string | null;
+  gridScale?: number | null;
+  gridOffsetX?: number | null;
+  gridOffsetY?: number | null;
+  gridData?: GridData | null;
+  covers?: Partial<Cover>[] | null;
+}
+
 const BattlemapContext = createContext<BattlemapContextValue | undefined>(undefined);
 
-const DEFAULT_SETTINGS: BattlemapSettings = {
-  gridScale: 1,
-  gridOffsetX: 0,
-  gridOffsetY: 0,
+const debugLog = (...args: unknown[]) => {
+  console.log("[BattlemapProvider]", ...args);
+};
+
+const getWebSocketUrl = () => {
+  if (process.env.NEXT_PUBLIC_WS_URL) {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return "http://localhost:3000";
 };
 
 const parseCover = (input: Partial<Cover> | null | undefined): Cover | null => {
-  if (!input || typeof input !== "object") {
+  if (!input || typeof input !== "object" || typeof input.id !== "string") {
     return null;
   }
 
   const { id, x, y, width, height, color } = input as Cover;
-  if (typeof id !== "string") {
-    return null;
-  }
 
   return {
     id,
@@ -100,7 +111,7 @@ const parseCover = (input: Partial<Cover> | null | undefined): Cover | null => {
     y: typeof y === "number" ? y : 0,
     width: typeof width === "number" ? width : 0,
     height: typeof height === "number" ? height : 0,
-    color: typeof color === "string" ? color : "#808080",
+    color: typeof color === "string" ? color : COVER_DEFAULT_COLOR,
   };
 };
 
@@ -123,7 +134,36 @@ const sanitizeCoverInput = (input: Partial<Cover> & { id: string }): Cover => {
   };
 };
 
+const normalizeBattlemapPayload = (payload: BattlemapPayload): BattlemapData => {
+  const gridData = sanitizeGridData(payload.gridData);
+  const covers: Cover[] = Array.isArray(payload.covers)
+    ? payload.covers.map(parseCover).filter((cover): cover is Cover => cover !== null)
+    : [];
+
+  return {
+    id: payload.id,
+    name: payload.name?.trim() || "Untitled Battlemap",
+    mapPath: payload.mapPath ?? null,
+    gridScale:
+      typeof payload.gridScale === "number" && Number.isFinite(payload.gridScale)
+        ? payload.gridScale
+        : DEFAULT_SETTINGS.gridScale,
+    gridOffsetX:
+      typeof payload.gridOffsetX === "number" && Number.isFinite(payload.gridOffsetX)
+        ? payload.gridOffsetX
+        : DEFAULT_SETTINGS.gridOffsetX,
+    gridOffsetY:
+      typeof payload.gridOffsetY === "number" && Number.isFinite(payload.gridOffsetY)
+        ? payload.gridOffsetY
+        : DEFAULT_SETTINGS.gridOffsetY,
+    gridData,
+    covers,
+  };
+};
+
 export const BattlemapProvider = ({ children }: { children: React.ReactNode }) => {
+  const { isDisplay, isMounted } = useViewMode();
+  const allowBattlemapMutations = isDisplay;
   const [battlemaps, setBattlemaps] = useState<BattlemapSummary[]>([]);
   const [currentBattlemapId, setCurrentBattlemapId] = useState<string | null>(null);
   const [currentBattlemap, setCurrentBattlemap] = useState<BattlemapData | null>(null);
@@ -133,8 +173,8 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
   const [isMutating, setIsMutating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  const socketRef = useRef<Socket | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const seedingDefaultBattlemapRef = useRef<boolean>(false);
 
   const clearDebounceTimer = useCallback(() => {
     if (debounceTimerRef.current) {
@@ -149,187 +189,129 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
     };
   }, [clearDebounceTimer]);
 
-  const seedDefaultBattlemap = useCallback(async (): Promise<BattlemapSummary | null> => {
-    if (seedingDefaultBattlemapRef.current) {
-      return null;
-    }
-
-    seedingDefaultBattlemapRef.current = true;
-    try {
-      const initialGridData = {
-        verticalLines: [...DEFAULT_GRID_DATA.verticalLines],
-        horizontalLines: [...DEFAULT_GRID_DATA.horizontalLines],
-        imageWidth: DEFAULT_GRID_DATA.imageWidth,
-        imageHeight: DEFAULT_GRID_DATA.imageHeight,
-      };
-
-      const { data, error: insertError } = await supabase
-        .from("battlemaps")
-        .insert({
-          name: DEFAULT_BATTLEMAP_NAME,
-          map_path: DEFAULT_BATTLEMAP_MAP_PATH,
-          grid_scale: DEFAULT_SETTINGS.gridScale,
-          grid_offset_x: DEFAULT_SETTINGS.gridOffsetX,
-          grid_offset_y: DEFAULT_SETTINGS.gridOffsetY,
-          grid_data: initialGridData,
-        })
-        .select("id, name, map_path")
-        .maybeSingle();
-
-      if (insertError) {
-        throw insertError;
-      }
-
-      if (!data) {
-        return null;
-      }
-
-      return {
-        id: data.id,
-        name: data.name ?? DEFAULT_BATTLEMAP_NAME,
-        mapPath: data.map_path ?? null,
-      };
-    } catch (seedError) {
-      console.error("Failed to seed default battlemap", seedError);
-      return null;
-    } finally {
-      seedingDefaultBattlemapRef.current = false;
-    }
-  }, []);
-
-  const loadBattlemaps = useCallback(async () => {
-    setIsListLoading(true);
-    setError(null);
-    try {
-      const { data, error: queryError } = await supabase
-        .from("battlemaps")
-        .select("id, name, map_path")
-        .order("created_at", { ascending: true });
-
-      if (queryError) {
-        throw queryError;
-      }
-
-      const summaries: BattlemapSummary[] =
-        data?.map((row) => ({
-          id: row.id,
-          name: row.name ?? "Untitled Battlemap",
-          mapPath: row.map_path ?? null,
-        })) ?? [];
-
-      if (summaries.length === 0) {
-        const seeded = await seedDefaultBattlemap();
-        if (seeded) {
-          setBattlemaps([seeded]);
-          setCurrentBattlemapId((prev) => prev ?? seeded.id);
-        } else {
-          setBattlemaps([]);
-        }
+  const emitWithAck = useCallback((event: string, payload: Record<string, unknown>) => {
+    return new Promise<unknown>((resolve, reject) => {
+      const socket = socketRef.current;
+      if (!socket) {
+        reject(new Error("Socket not connected"));
         return;
       }
 
-      setBattlemaps(summaries);
+      let settled = false;
+      debugLog("emit", event, payload);
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error("Request timed out"));
+        }
+      }, 10000);
 
-      // Default to first battlemap if none selected
-      setCurrentBattlemapId((prev) => (prev ? prev : summaries[0]?.id ?? null));
-    } catch (loadError) {
-      console.error("Failed to load battlemaps", loadError);
-      setError("Failed to load battlemaps");
-      setBattlemaps([]);
-    } finally {
-      setIsListLoading(false);
+      socket.emit(event, payload, (response: unknown) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+
+        const ack = (response ?? {}) as { ok?: boolean; error?: string };
+        debugLog("ack", event, ack);
+
+        if (!ack || ack.ok !== false) {
+          resolve(response);
+        } else {
+          reject(new Error(ack.error || "Request failed"));
+        }
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isMounted) {
+      return;
     }
-  }, [seedDefaultBattlemap]);
 
-  const loadBattlemap = useCallback(
+    setIsListLoading(true);
+    setError(null);
+
+    const socket = io(getWebSocketUrl(), {
+      transports: ["websocket", "polling"],
+    });
+    socketRef.current = socket;
+
+    const identificationPayload = {
+      isDisplay,
+      suppressPresence: true,
+      allowBattlemapMutations: isDisplay,
+    };
+    socket.emit("user-identify", identificationPayload);
+
+    const handleList = (list: BattlemapSummary[]) => {
+      debugLog("battlemap:list", list.map((item) => ({ id: item.id, name: item.name })));
+      setBattlemaps(list);
+      setIsListLoading(false);
+    };
+
+    const handleUpdated = (payload: BattlemapPayload) => {
+      debugLog("battlemap:updated", payload.id);
+      const normalized = normalizeBattlemapPayload(payload);
+      setBattlemaps((prev) =>
+        prev.map((item) =>
+          item.id === normalized.id ? { ...item, name: normalized.name, mapPath: normalized.mapPath } : item
+        )
+      );
+      setCurrentBattlemap((prev) => (prev?.id === normalized.id ? normalized : prev));
+    };
+
+    const handleDeleted = ({ battlemapId }: { battlemapId: string }) => {
+      debugLog("battlemap:deleted", battlemapId);
+      setBattlemaps((prev) => prev.filter((item) => item.id !== battlemapId));
+      setCurrentBattlemap((prev) => (prev?.id === battlemapId ? null : prev));
+      setCurrentBattlemapId((prev) => (prev === battlemapId ? null : prev));
+    };
+
+    const handleError = (connectionError: Error) => {
+      console.error("Battlemap socket error", connectionError);
+      setError("Battlemap connection failed");
+      setIsListLoading(false);
+    };
+
+    const handleActive = ({ battlemapId }: { battlemapId: string | null }) => {
+      debugLog("battlemap:active", battlemapId);
+      setCurrentBattlemapId((prev) => (prev === battlemapId ? prev : battlemapId));
+    };
+
+    socket.on("battlemap:list", handleList);
+    socket.on("battlemap:active", handleActive);
+    socket.on("battlemap:updated", handleUpdated);
+    socket.on("battlemap:deleted", handleDeleted);
+    socket.on("connect_error", handleError);
+
+    return () => {
+      socket.off("battlemap:list", handleList);
+      socket.off("battlemap:active", handleActive);
+      socket.off("battlemap:updated", handleUpdated);
+      socket.off("battlemap:deleted", handleDeleted);
+      socket.off("connect_error", handleError);
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [isMounted, isDisplay]);
+
+  const requestBattlemap = useCallback(
     async (battlemapId: string) => {
+      debugLog("requestBattlemap", battlemapId);
       setIsBattlemapLoading(true);
       setError(null);
-
       try {
-        const { data, error: queryError } = await supabase
-          .from("battlemaps")
-          .select(
-            `
-            id,
-            name,
-            map_path,
-            grid_scale,
-            grid_offset_x,
-            grid_offset_y,
-            grid_data,
-            battlemap_covers (
-              id,
-              x,
-              y,
-              width,
-              height,
-              color
-            )
-          `
-          )
-          .eq("id", battlemapId)
-          .maybeSingle();
-
-        if (queryError) {
-          throw queryError;
+        const response = await emitWithAck("battlemap:get", { battlemapId });
+        if (response?.battlemap) {
+          const normalized = normalizeBattlemapPayload(response.battlemap as BattlemapPayload);
+          debugLog("battlemap:get success", battlemapId, normalized.name);
+          setCurrentBattlemap(normalized);
+        } else {
+          debugLog("battlemap:get returned empty", battlemapId);
+          setCurrentBattlemap(null);
         }
-
-        if (!data) {
-          throw new Error("Battlemap not found");
-        }
-
-        const mapPath = data.map_path ?? null;
-        const gridScale =
-          typeof data.grid_scale === "number" && Number.isFinite(data.grid_scale)
-            ? data.grid_scale
-            : DEFAULT_SETTINGS.gridScale;
-        const gridOffsetX =
-          typeof data.grid_offset_x === "number" && Number.isFinite(data.grid_offset_x)
-            ? data.grid_offset_x
-            : DEFAULT_SETTINGS.gridOffsetX;
-        const gridOffsetY =
-          typeof data.grid_offset_y === "number" && Number.isFinite(data.grid_offset_y)
-            ? data.grid_offset_y
-            : DEFAULT_SETTINGS.gridOffsetY;
-
-        let gridData = sanitizeGridData(data.grid_data);
-
-        if (!hasGridData(gridData) && mapPath) {
-          try {
-            gridData = await fetchGridData({ mapPath });
-            if (hasGridData(gridData)) {
-              await supabase
-                .from("battlemaps")
-                .update({
-                  grid_data: gridData,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", battlemapId);
-            }
-          } catch (gridError) {
-            console.error("Failed to load grid data", gridError);
-            gridData = DEFAULT_GRID_DATA;
-          }
-        }
-
-        const covers: Cover[] =
-          Array.isArray(data.battlemap_covers)
-            ? data.battlemap_covers
-                .map(parseCover)
-                .filter((cover): cover is Cover => cover !== null)
-            : [];
-
-        setCurrentBattlemap({
-          id: data.id,
-          name: data.name ?? "Untitled Battlemap",
-          mapPath,
-          gridScale,
-          gridOffsetX,
-          gridOffsetY,
-          gridData,
-          covers,
-        });
       } catch (loadError) {
         console.error("Failed to load battlemap", loadError);
         setError("Failed to load battlemap");
@@ -338,30 +320,47 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         setIsBattlemapLoading(false);
       }
     },
-    []
+    [emitWithAck]
   );
 
   useEffect(() => {
-    loadBattlemaps();
-  }, [loadBattlemaps]);
-
-  useEffect(() => {
-    if (currentBattlemapId) {
-      loadBattlemap(currentBattlemapId);
-    } else {
+    if (!currentBattlemapId) {
+      debugLog("currentBattlemapId cleared");
       setCurrentBattlemap(null);
+      return;
     }
-  }, [currentBattlemapId, loadBattlemap]);
 
-  const selectBattlemap = useCallback((battlemapId: string) => {
-    setCurrentBattlemapId((prev) => (prev === battlemapId ? prev : battlemapId));
-  }, []);
+    debugLog("currentBattlemapId changed", currentBattlemapId);
+    requestBattlemap(currentBattlemapId);
+  }, [currentBattlemapId, requestBattlemap]);
+
+  const selectBattlemap = useCallback(
+    async (battlemapId: string) => {
+      if (!battlemapId) {
+        debugLog("selectBattlemap called with empty id");
+        return;
+      }
+
+      debugLog("selectBattlemap local change", battlemapId);
+      setCurrentBattlemapId((prev) => (prev === battlemapId ? prev : battlemapId));
+
+      if (allowBattlemapMutations) {
+        try {
+          await emitWithAck("battlemap:set-active", { battlemapId });
+        } catch (activeError) {
+          console.error("Failed to set active battlemap", activeError);
+          setError("Failed to set active battlemap");
+        }
+      }
+    },
+    [allowBattlemapMutations, emitWithAck]
+  );
 
   const refreshBattlemap = useCallback(async () => {
     if (currentBattlemapId) {
-      await loadBattlemap(currentBattlemapId);
+      await requestBattlemap(currentBattlemapId);
     }
-  }, [currentBattlemapId, loadBattlemap]);
+  }, [currentBattlemapId, requestBattlemap]);
 
   const renameBattlemap = useCallback(
     async (name: string) => {
@@ -369,30 +368,15 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
 
+      debugLog("renameBattlemap", currentBattlemapId, name);
       setIsMutating(true);
       setError(null);
       try {
         const trimmedName = name.trim() || "Untitled Battlemap";
-        const { error: updateError } = await supabase
-          .from("battlemaps")
-          .update({
-            name: trimmedName,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", currentBattlemapId);
-
-        if (updateError) {
-          throw updateError;
-        }
-
-        setCurrentBattlemap((prev) =>
-          prev ? { ...prev, name: trimmedName } : prev
-        );
-        setBattlemaps((prev) =>
-          prev.map((item) =>
-            item.id === currentBattlemapId ? { ...item, name: trimmedName } : item
-          )
-        );
+        await emitWithAck("battlemap:rename", {
+          battlemapId: currentBattlemapId,
+          name: trimmedName,
+        });
       } catch (renameError) {
         console.error("Failed to rename battlemap", renameError);
         setError("Failed to rename battlemap");
@@ -400,7 +384,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         setIsMutating(false);
       }
     },
-    [currentBattlemapId]
+    [currentBattlemapId, emitWithAck]
   );
 
   const updateBattlemapMapPath = useCallback(
@@ -409,43 +393,16 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
 
+      debugLog("updateBattlemapMapPath", currentBattlemapId, mapPath);
       setIsMutating(true);
       setError(null);
-
       try {
         const sanitizedMapPath = mapPath.trim();
-        const { error: updateError } = await supabase
-          .from("battlemaps")
-          .update({
-            map_path: sanitizedMapPath || null,
-            grid_data: DEFAULT_GRID_DATA,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", currentBattlemapId);
-
-        if (updateError) {
-          throw updateError;
-        }
-
-        setCurrentBattlemap((prev) =>
-          prev
-            ? {
-                ...prev,
-                mapPath: sanitizedMapPath || null,
-                gridData: DEFAULT_GRID_DATA,
-              }
-            : prev
-        );
-        setBattlemaps((prev) =>
-          prev.map((item) =>
-            item.id === currentBattlemapId ? { ...item, mapPath: sanitizedMapPath || null } : item
-          )
-        );
-
-        // Re-fetch battlemap to refresh grid data if we have a valid path
-        if (sanitizedMapPath) {
-          await loadBattlemap(currentBattlemapId);
-        }
+        await emitWithAck("battlemap:update-map-path", {
+          battlemapId: currentBattlemapId,
+          mapPath: sanitizedMapPath || null,
+        });
+        await requestBattlemap(currentBattlemapId);
       } catch (updateError) {
         console.error("Failed to update map path", updateError);
         setError("Failed to update map path");
@@ -453,196 +410,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         setIsMutating(false);
       }
     },
-    [currentBattlemapId, loadBattlemap]
-  );
-
-  const deleteBattlemap = useCallback(
-    async (battlemapId: string) => {
-      if (!battlemapId) {
-        return;
-      }
-
-      setIsMutating(true);
-      setError(null);
-      try {
-        const remaining = battlemaps.filter((map) => map.id !== battlemapId);
-        const fallbackId = remaining[0]?.id ?? null;
-
-        const { error: deleteError } = await supabase
-          .from("battlemaps")
-          .delete()
-          .eq("id", battlemapId);
-
-        if (deleteError) {
-          throw deleteError;
-        }
-
-        setBattlemaps(remaining);
-        setCurrentBattlemap((prev) => (prev?.id === battlemapId ? null : prev));
-        setCurrentBattlemapId((prev) => (prev === battlemapId ? fallbackId : prev));
-      } catch (deleteError) {
-        console.error("Failed to delete battlemap", deleteError);
-        setError("Failed to delete battlemap");
-      } finally {
-        setIsMutating(false);
-      }
-    },
-    [battlemaps]
-  );
-
-  const addCover = useCallback(
-    async (coverInput: Omit<Cover, "id"> & { id?: string }) => {
-      if (!currentBattlemapId) {
-        return null;
-      }
-
-      const coverId =
-        typeof coverInput.id === "string" && coverInput.id.trim() !== ""
-          ? coverInput.id
-          : generateCoverId();
-      const sanitized = sanitizeCoverInput({ ...coverInput, id: coverId });
-
-      try {
-        const { error: insertError } = await supabase.from("battlemap_covers").insert({
-          id: sanitized.id,
-          battlemap_id: currentBattlemapId,
-          x: sanitized.x,
-          y: sanitized.y,
-          width: sanitized.width,
-          height: sanitized.height,
-          color: sanitized.color,
-        });
-
-        if (insertError) {
-          throw insertError;
-        }
-
-        setCurrentBattlemap((prev) =>
-          prev
-            ? {
-                ...prev,
-                covers: [...prev.covers.filter((cover) => cover.id !== sanitized.id), sanitized],
-              }
-            : prev
-        );
-
-        return sanitized;
-      } catch (insertError) {
-        console.error("Failed to add cover", insertError);
-        setError("Failed to add cover");
-        return null;
-      }
-    },
-    [currentBattlemapId]
-  );
-
-  const updateCover = useCallback(
-    async (id: string, updates: Partial<Cover>) => {
-      if (!currentBattlemapId || !id) {
-        return;
-      }
-
-      const existingCover = currentBattlemap?.covers.find((cover) => cover.id === id);
-      if (!existingCover) {
-        return;
-      }
-
-      const sanitized = sanitizeCoverInput({ ...existingCover, ...updates, id });
-
-      try {
-        const { error: updateError } = await supabase
-          .from("battlemap_covers")
-          .update({
-            x: sanitized.x,
-            y: sanitized.y,
-            width: sanitized.width,
-            height: sanitized.height,
-            color: sanitized.color,
-          })
-          .eq("id", id);
-
-        if (updateError) {
-          throw updateError;
-        }
-
-        setCurrentBattlemap((prev) =>
-          prev
-            ? {
-                ...prev,
-                covers: prev.covers.map((cover) => (cover.id === id ? sanitized : cover)),
-              }
-            : prev
-        );
-      } catch (updateError) {
-        console.error("Failed to update cover", updateError);
-        setError("Failed to update cover");
-      }
-    },
-    [currentBattlemapId, currentBattlemap]
-  );
-
-  const removeCover = useCallback(
-    async (id: string) => {
-      if (!currentBattlemapId || !id) {
-        return;
-      }
-
-      setError(null);
-      try {
-        const { error: deleteError } = await supabase
-          .from("battlemap_covers")
-          .delete()
-          .eq("id", id);
-        if (deleteError) {
-          throw deleteError;
-        }
-
-        setCurrentBattlemap((prev) =>
-          prev
-            ? {
-                ...prev,
-                covers: prev.covers.filter((cover) => cover.id !== id),
-              }
-            : prev
-        );
-      } catch (deleteError) {
-        console.error("Failed to remove cover", deleteError);
-        setError("Failed to remove cover");
-      }
-    },
-    [currentBattlemapId]
-  );
-
-  const persistSettings = useCallback(
-    async (settings: BattlemapSettings) => {
-      if (!currentBattlemapId) {
-        return;
-      }
-
-      setIsSettingsSaving(true);
-      setError(null);
-      try {
-        const { error: updateError } = await supabase
-          .from("battlemaps")
-          .update({
-            grid_scale: settings.gridScale,
-            grid_offset_x: settings.gridOffsetX,
-            grid_offset_y: settings.gridOffsetY,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", currentBattlemapId);
-
-        if (updateError) {
-          throw updateError;
-        }
-      } catch (updateError) {
-        console.error("Failed to update battlemap settings", updateError);
-        setError("Failed to update battlemap settings");
-      } finally {
-        setIsSettingsSaving(false);
-      }
-    },
-    [currentBattlemapId]
+    [currentBattlemapId, emitWithAck, requestBattlemap]
   );
 
   const updateBattlemapSettings = useCallback(
@@ -651,6 +419,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
 
+      debugLog("updateBattlemapSettings", currentBattlemapId, updates);
       let nextSettings: BattlemapSettings | null = null;
       setCurrentBattlemap((prev) => {
         if (!prev) {
@@ -676,76 +445,196 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       if (nextSettings) {
         clearDebounceTimer();
         debounceTimerRef.current = setTimeout(() => {
-          persistSettings(nextSettings!);
+          setIsSettingsSaving(true);
+          emitWithAck("battlemap:update-settings", {
+            battlemapId: currentBattlemapId,
+            ...nextSettings,
+          })
+            .catch((settingsError) => {
+              console.error("Failed to update battlemap settings", settingsError);
+              setError("Failed to update battlemap settings");
+            })
+            .finally(() => {
+              setIsSettingsSaving(false);
+            });
         }, 500);
       }
     },
-    [clearDebounceTimer, persistSettings, currentBattlemapId]
+    [currentBattlemapId, clearDebounceTimer, emitWithAck]
   );
 
   const createBattlemap = useCallback(
     async ({ name, mapPath }: CreateBattlemapInput) => {
+      debugLog("createBattlemap", name, mapPath);
       setIsMutating(true);
       setError(null);
 
       try {
-        const trimmedName = name.trim() || "Untitled Battlemap";
-        const sanitizedMapPath = mapPath.trim();
-        const initialSettings: BattlemapSettings = {
-          gridScale: DEFAULT_SETTINGS.gridScale,
-          gridOffsetX: DEFAULT_SETTINGS.gridOffsetX,
-          gridOffsetY: DEFAULT_SETTINGS.gridOffsetY,
-        };
+        const normalizedName = name.trim() || "Untitled Battlemap";
+        const normalizedMapPath = mapPath.trim() || null;
+        const response = await emitWithAck("battlemap:create", {
+          name: normalizedName,
+          mapPath: normalizedMapPath,
+        });
 
-        const { data, error: insertError } = await supabase
-          .from("battlemaps")
-          .insert({
-            name: trimmedName,
-            map_path: sanitizedMapPath || null,
-            grid_scale: initialSettings.gridScale,
-            grid_offset_x: initialSettings.gridOffsetX,
-            grid_offset_y: initialSettings.gridOffsetY,
-            grid_data: sanitizedMapPath ? null : DEFAULT_GRID_DATA,
-          })
-          .select("id, name, map_path")
-          .maybeSingle();
-
-        if (insertError) {
-          throw insertError;
+        const newBattlemapId = response?.battlemapId;
+        if (typeof newBattlemapId === "string") {
+          setCurrentBattlemapId(newBattlemapId);
+          await requestBattlemap(newBattlemapId);
+          const summary: BattlemapSummary = {
+            id: newBattlemapId,
+            name: normalizedName,
+            mapPath: normalizedMapPath,
+          };
+          return summary;
         }
 
-        if (!data) {
-          throw new Error("Failed to create battlemap");
-        }
-
-        const summary: BattlemapSummary = {
-          id: data.id,
-          name: data.name ?? trimmedName,
-          mapPath: data.map_path ?? null,
-        };
-
-        setBattlemaps((prev) => [...prev, summary]);
-        setCurrentBattlemapId(data.id);
-        return summary;
-      } catch (insertError) {
-        console.error("Failed to create battlemap", insertError);
+        return null;
+      } catch (createError) {
+        console.error("Failed to create battlemap", createError);
         setError("Failed to create battlemap");
         return null;
       } finally {
         setIsMutating(false);
       }
     },
-    []
+    [emitWithAck, requestBattlemap]
   );
 
   const syncBattlemapFromServer = useCallback((battlemapId: string | null) => {
     if (!battlemapId) {
-      setCurrentBattlemapId((prev) => (prev !== null ? null : prev));
+      setCurrentBattlemapId(null);
       setCurrentBattlemap(null);
       return;
     }
     setCurrentBattlemapId((prev) => (prev === battlemapId ? prev : battlemapId));
   }, []);
+
+  const deleteBattlemap = useCallback(
+    async (battlemapId: string) => {
+      debugLog("deleteBattlemap", battlemapId);
+      setIsMutating(true);
+      setError(null);
+      try {
+        await emitWithAck("battlemap:delete", { battlemapId });
+        if (currentBattlemapId === battlemapId) {
+          setCurrentBattlemapId(null);
+          setCurrentBattlemap(null);
+        }
+      } catch (deleteError) {
+        console.error("Failed to delete battlemap", deleteError);
+        setError("Failed to delete battlemap");
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [currentBattlemapId, emitWithAck]
+  );
+
+  const addCover = useCallback(
+    async (coverInput: Omit<Cover, "id"> & { id?: string }) => {
+      if (!currentBattlemapId || !currentBattlemap) {
+        return null;
+      }
+
+      debugLog("addCover", currentBattlemapId, coverInput);
+      const coverId =
+        typeof coverInput.id === "string" && coverInput.id.trim() !== ""
+          ? coverInput.id
+          : generateCoverId();
+      const sanitized = sanitizeCoverInput({ ...coverInput, id: coverId });
+
+      setCurrentBattlemap((prev) =>
+        prev
+          ? {
+              ...prev,
+              covers: [...prev.covers.filter((cover) => cover.id !== sanitized.id), sanitized],
+            }
+          : prev
+      );
+
+      try {
+        await emitWithAck("battlemap:add-cover", {
+          battlemapId: currentBattlemapId,
+          cover: sanitized,
+        });
+        return sanitized;
+      } catch (insertError) {
+        console.error("Failed to add cover", insertError);
+        setError("Failed to add cover");
+        await refreshBattlemap();
+        return null;
+      }
+    },
+    [currentBattlemap, currentBattlemapId, emitWithAck, refreshBattlemap]
+  );
+
+  const updateCover = useCallback(
+    async (id: string, updates: Partial<Cover>) => {
+      if (!currentBattlemapId) {
+        return;
+      }
+
+      debugLog("updateCover", id, updates);
+      setCurrentBattlemap((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        const existing = prev.covers.find((cover) => cover.id === id);
+        if (!existing) {
+          return prev;
+        }
+        const sanitized = sanitizeCoverInput({ ...existing, ...updates, id });
+        return {
+          ...prev,
+          covers: prev.covers.map((cover) => (cover.id === id ? sanitized : cover)),
+        };
+      });
+
+      try {
+        await emitWithAck("battlemap:update-cover", {
+          battlemapId: currentBattlemapId,
+          coverId: id,
+          updates,
+        });
+      } catch (updateError) {
+        console.error("Failed to update cover", updateError);
+        setError("Failed to update cover");
+        await refreshBattlemap();
+      }
+    },
+    [currentBattlemapId, emitWithAck, refreshBattlemap]
+  );
+
+  const removeCover = useCallback(
+    async (id: string) => {
+      if (!currentBattlemapId) {
+        return;
+      }
+
+      debugLog("removeCover", id);
+      setCurrentBattlemap((prev) =>
+        prev
+          ? {
+              ...prev,
+              covers: prev.covers.filter((cover) => cover.id !== id),
+            }
+          : prev
+      );
+
+      try {
+        await emitWithAck("battlemap:remove-cover", {
+          battlemapId: currentBattlemapId,
+          coverId: id,
+        });
+      } catch (deleteError) {
+        console.error("Failed to remove cover", deleteError);
+        setError("Failed to remove cover");
+        await refreshBattlemap();
+      }
+    },
+    [currentBattlemapId, emitWithAck, refreshBattlemap]
+  );
 
   const value = useMemo<BattlemapContextValue>(
     () => ({
@@ -802,5 +691,3 @@ export const useBattlemap = (): BattlemapContextValue => {
   }
   return context;
 };
-
-

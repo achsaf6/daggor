@@ -3,20 +3,22 @@
 A collaborative online battlemap that lets a game master run a cinematic “display mode” on the table while each player moves their own token from a phone-friendly “mobile mode.” The app runs on Next.js 16 with a colocated Socket.IO server, Supabase for persistence, and on-demand grid detection powered by `sharp`.
 
 ## Contents
+
 - [Overview](#overview)
 - [Architecture Highlights](#architecture-highlights)
 - [Frontend Surfaces](#frontend-surfaces)
 - [Real-Time Collaboration Flow](#real-time-collaboration-flow)
-- [Data & Persistence](#data--persistence)
+- [Data &amp; Persistence](#data--persistence)
 - [API Surface](#api-surface)
-- [Environment & Configuration](#environment--configuration)
+- [Environment &amp; Configuration](#environment--configuration)
 - [Local Development](#local-development)
-- [Supabase & Data Migrations](#supabase--data-migrations)
+- [Supabase &amp; Data Migrations](#supabase--data-migrations)
 - [Deployment](#deployment)
-- [Testing & Quality](#testing--quality)
-- [Troubleshooting & Tips](#troubleshooting--tips)
+- [Testing &amp; Quality](#testing--quality)
+- [Troubleshooting &amp; Tips](#troubleshooting--tips)
 
 ## Overview
+
 Daggor renders a tactical map (`MapImage`) once and layers sockets-driven components—tokens, covers, and dynamic gridlines—on top. The root `MapView` inspects the client viewport at runtime and mounts either the large-screen display experience or the touch-first mobile canvas, keeping hydration safe by defaulting to display mode server-side.
 
 ```1:34:app/components/MapView.tsx
@@ -61,6 +63,7 @@ export const MapView = () => {
 ## Architecture Highlights
 
 ### Runtime stack
+
 - **Next.js App Router + Tailwind CSS v4** render the UI, with fonts configured in `app/layout.tsx`.
 - **Custom Node HTTP + Socket.IO server (`server.js`)** wraps `next`’s request handler so realtime traffic and SSR share the same port/hostname. Tokens and covers are tracked in-memory for low latency; Supabase persists long-lived map metadata/grid defaults.
 - **Supabase** provides Postgres tables (`map_settings`, `battlemaps`, `battlemap_covers`) and object storage for uploaded map images.
@@ -115,6 +118,7 @@ app.prepare().then(() => {
 ```
 
 ### Client socket wrapper
+
 `useSocket` encapsulates connection lifecycle, persistent player IDs, multi-transport fallbacks, and the full event surface (tokens, covers, reconnects). It reads `NEXT_PUBLIC_WS_URL` when present, otherwise falls back to the current origin so the same code works locally, on Vercel, or any Node host.
 
 ```64:112:app/hooks/useSocket.ts
@@ -153,6 +157,7 @@ app.prepare().then(() => {
 ## Frontend Surfaces
 
 ### Display surface (GM / tabletop)
+
 `MapViewDisplay` is optimized for a kiosk/TV: it freezes the camera, overlays the `SidebarToolbar`, renders draggable cover rectangles, and lets the DM drag/drop extra tokens that get broadcast to everyone. Gridlines are recomputed once via `/api/gridlines`, snapped to Supabase-controlled scale/offset, and cached in component state.
 
 ```327:381:app/components/MapViewDisplay.tsx
@@ -278,6 +283,7 @@ The toolbar bundles a grid slider, joystick-style offset control, token color pi
 ```
 
 ### Mobile surface (players)
+
 The mobile canvas embraces zooming, pinching, and Hammer.js gesture recognition, auto-centering on the player’s token whenever they stop interacting. It renders draggable tokens inside a transformed wrapper so finger movement feels 1:1 even when zoomed, and reuses the same `TokenManager` for other participants.
 
 ```269:337:app/components/MapViewMobile/index.tsx
@@ -335,6 +341,7 @@ The mobile canvas embraces zooming, pinching, and Hammer.js gesture recognition,
 ```
 
 ### Shared interaction primitives
+
 `TokenManager` hydrates all active/disconnected tokens as draggable circles (or fades them when their socket drops). DM-mode adds double-click/right-click removal affordances, while player-mode restricts interaction to the user’s own token.
 
 ```74:136:app/components/TokenManager.tsx
@@ -376,6 +383,7 @@ The mobile canvas embraces zooming, pinching, and Hammer.js gesture recognition,
 ```
 
 ## Real-Time Collaboration Flow
+
 1. **Handshake** – Each client emits `user-identify` immediately after connecting, including a stable `persistentUserId` saved to `localStorage` and a flag for display/mobile mode. The server restores colors/positions for returning tokens and keeps a disconnected cache so the DM can still remove stale markers even if the socket is gone.
 2. **Position updates** – Dragging a token emits `position-update` events with `{ tokenId, position }`. The server applies them to whichever token is referenced (supporting DM overrides) and broadcasts `user-moved`.
 3. **Token lifecycle** – Display mode can spawn anonymous tokens (`add-token`), or remove players by `persistentUserId` (`remove-token`), and the client keeps both active + disconnected maps in sync.
@@ -385,6 +393,7 @@ The mobile canvas embraces zooming, pinching, and Hammer.js gesture recognition,
 See `server.js` and `app/hooks/useSocket.ts` in the previous snippets for the canonical event list. When scaling beyond a single instance, plug the bundled `@socket.io/redis-adapter` + `ioredis` dependencies into `server.js` to fan out presence state.
 
 ## Data & Persistence
+
 - **Supabase tables**
   - `map_settings`: single-record table storing the live grid scale + offsets that every client subscribes to.
   - `battlemaps` + `battlemap_covers`: canonical list of map assets, metadata, and persisted cover rectangles.
@@ -487,6 +496,7 @@ export const useSettings = () => {
 ```
 
 ## API Surface
+
 - **`GET /api/gridlines`** – Reads a map image from `public/maps`, runs Sobel edge detection (via `sharp`), infers square spacing, then emits normalized grid coordinates + metadata. When detection fails it returns an empty default to keep the UI responsive.
 
 ```1:66:app/api/gridlines/route.ts
@@ -543,17 +553,17 @@ export async function POST(request: NextRequest) {
 
 ## Environment & Configuration
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_KEY` | ✅ | Client-side Supabase credentials used by `useSettings` and future public queries. |
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | ✅ (server) | Full-access keys for API routes and uploads (`lib/supabaseServer`). |
-| `SUPABASE_PROJECT_URL`, `SUPABASE_KEY` | optional fallbacks | Legacy names accepted by both Supabase clients. |
-| `SUPABASE_MAPS_BUCKET` | optional (default `maps`) | Object storage bucket storing uploaded battlemaps. |
-| `MAP_UPLOAD_MAX_BYTES` | optional | Override max upload size (default 10 MiB). |
-| `NEXT_PUBLIC_WS_URL` | optional | Forces clients to connect to a specific Socket.IO origin (fallback is `window.location.origin`). |
-| `PORT` | optional | Port for `server.js` (`3000` default). |
-| `DAGOR_URL` | ✅ in production | Store the deployed Vercel URL so other services (and `NEXT_PUBLIC_WS_URL`) can reference it consistently. |
-| `SUPABASE_MAPS_BUCKET`, `MAP_UPLOAD_MAX_BYTES` | optional | Tune upload destination/limits. |
+| Variable                                                   | Required                    | Description                                                                                                 |
+| ---------------------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_KEY` | ✅                          | Client-side Supabase credentials used by `useSettings` and future public queries.                         |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`            | ✅ (server)                 | Full-access keys for API routes and uploads (`lib/supabaseServer`).                                       |
+| `SUPABASE_PROJECT_URL`, `SUPABASE_KEY`                 | optional fallbacks          | Legacy names accepted by both Supabase clients.                                                             |
+| `SUPABASE_MAPS_BUCKET`                                   | optional (default `maps`) | Object storage bucket storing uploaded battlemaps.                                                          |
+| `MAP_UPLOAD_MAX_BYTES`                                   | optional                    | Override max upload size (default 10 MiB).                                                                 |
+| `NEXT_PUBLIC_WS_URL`                                     | optional                    | Forces clients to connect to a specific Socket.IO origin (fallback is `window.location.origin`).          |
+| `PORT`                                                   | optional                    | Port for `server.js` (`3000` default).                                                                  |
+| `DAGOR_URL`                                              | ✅ in production            | Store the deployed Vercel URL so other services (and `NEXT_PUBLIC_WS_URL`) can reference it consistently. |
+| `SUPABASE_MAPS_BUCKET`, `MAP_UPLOAD_MAX_BYTES`         | optional                    | Tune upload destination/limits.                                                                             |
 
 The Supabase clients enforce these variables at import time:
 
@@ -571,6 +581,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 ```
 
 ## Local Development
+
 1. **Prerequisites** – Install Node 20+, npm 10+, and ensure `brew install vips` (or OS equivalent) so `sharp` can run the gridline detector locally.
 2. **Supabase** – Create a project (or run `supabase start` locally), then apply the SQL in `migrations/001_create_map_settings.sql` and `migrations/002_create_battlemaps.sql` via `psql` or the Supabase SQL console.
 3. **Environment** – Create `.env.local` with at least: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_MAPS_BUCKET=maps`, `PORT=3000`, and optionally `NEXT_PUBLIC_WS_URL=http://localhost:3000`.
@@ -604,11 +615,13 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 Tip: when testing from real devices on the same LAN, set `NEXT_PUBLIC_WS_URL` to your machine IP (`http://192.168.x.x:3000`) so phones can reach the dev socket.
 
 ## Supabase & Data Migrations
+
 1. **Apply SQL** – `psql $SUPABASE_URL < migrations/001_create_map_settings.sql` and `psql ... < migrations/002_create_battlemaps.sql`, or paste the files into the Supabase SQL editor.
 2. **Seed default battlemap** – the migration already inserts one row if the table is empty, and `BattlemapProvider` can seed again in-app if necessary.
 3. **Storage** – Create a `maps` bucket (or rename + update `SUPABASE_MAPS_BUCKET`) and mark it public if you want direct asset URLs; otherwise proxy through signed URLs.
 
 ## Deployment
+
 - **Platform** – Ship to Vercel (per project requirement) or any Node host that can run `node server.js`. Vercel’s Build Output API / `vercel deploy --prebuilt` can run the custom server as a single `Node.js` runtime, enabling websockets.
 - **Build command** – `npm install && npm run build`.
 - **Start command** – `npm run start` (which sets `NODE_ENV=production` and runs the same socket-aware server).
@@ -617,6 +630,7 @@ Tip: when testing from real devices on the same LAN, set `NEXT_PUBLIC_WS_URL` to
 - **No Cloud Run** – This project is not targeting Google Cloud Run; keep the deployment pipeline focused on Vercel or another long-lived Node host.
 
 ## Testing & Quality
+
 - `npm run lint` before commits to catch hook or TypeScript mistakes.
 - Manual flows to verify before merging:
   - Drag tokens (DM and player) and confirm positions propagate to all devices.
@@ -626,6 +640,7 @@ Tip: when testing from real devices on the same LAN, set `NEXT_PUBLIC_WS_URL` to
   - Restart the Node server to ensure reconnection/resurrection flows work as expected.
 
 ## Troubleshooting & Tips
+
 - **Gridline detection errors** – Ensure `sharp` native deps (`libvips`) are installed. If detection keeps failing (e.g., due to high-contrast art), the API returns an empty grid so tokens fall back to 5 % sizing; adjust manually with the grid slider.
 - **Sockets won’t connect** – Double-check `NEXT_PUBLIC_WS_URL` and CORS; connection errors appear in both the server logs and the browser console via `useSocket`.
 - **Supabase auth errors** – Missing service keys throw during import time (see `lib/supabaseServer.js`); set all required variables before running the dev server.
