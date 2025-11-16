@@ -51,16 +51,8 @@ export const TokenManager = ({
 }: TokenManagerProps) => {
   if (!imageBounds) return null;
 
-  const handleTokenClick = (e: React.MouseEvent, persistentUserId: string) => {
-    // Only allow removal in display mode
-    if (isDisplay && onRemoveToken && e.detail === 2) {
-      // Double click to remove
-      e.preventDefault();
-      e.stopPropagation();
-      onRemoveToken(persistentUserId);
-    }
-  };
 
+  
   const handleTokenContextMenu = (e: React.MouseEvent, persistentUserId: string) => {
     // Right click to remove in display mode
     if (isDisplay && onRemoveToken) {
@@ -94,9 +86,8 @@ export const TokenManager = ({
             gridOffsetX={gridOffsetX}
             gridOffsetY={gridOffsetY}
             isMounted={isMounted}
-            onClick={isDisplay ? (e) => handleTokenClick(e, persistentUserId) : undefined}
             onContextMenu={isDisplay ? (e) => handleTokenContextMenu(e, persistentUserId) : undefined}
-            title={isDisplay ? "Double-click or right-click to remove" : undefined}
+            title={isDisplay ? "Right-click to remove" : undefined}
             onPositionUpdate={onPositionUpdate}
             transform={transform}
             onDragStateChange={onDragStateChange}
@@ -125,9 +116,8 @@ export const TokenManager = ({
             gridOffsetY={gridOffsetY}
             isMounted={isMounted}
             opacity={0.6}
-            onClick={isDisplay ? (e) => handleTokenClick(e, user.id) : undefined}
             onContextMenu={isDisplay ? (e) => handleTokenContextMenu(e, user.id) : undefined}
-            title={isDisplay ? "Disconnected - Double-click or right-click to remove" : "Disconnected"}
+            title={isDisplay ? "Disconnected - Right-click to remove" : "Disconnected"}
             onPositionUpdate={onPositionUpdate}
             transform={transform}
             onDragStateChange={onDragStateChange}
@@ -139,4 +129,3 @@ export const TokenManager = ({
     </>
   );
 };
-

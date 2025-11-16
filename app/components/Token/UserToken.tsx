@@ -1,9 +1,11 @@
+import { ReactNode } from "react";
 import { Position, ImageBounds } from "../../types";
 import { Token } from "./Token";
 
 interface UserTokenProps {
   position: Position;
   color: string;
+  imageSrc?: string | null;
   imageBounds: ImageBounds | null;
   worldMapWidth?: number;
   worldMapHeight?: number;
@@ -23,11 +25,13 @@ interface UserTokenProps {
   isMounted?: boolean;
   opacity?: number;
   title?: string;
+  children?: ReactNode;
 }
 
 export const UserToken = ({
   position,
   color,
+  imageSrc,
   imageBounds,
   worldMapWidth = 0,
   worldMapHeight = 0,
@@ -42,11 +46,13 @@ export const UserToken = ({
   isMounted,
   opacity,
   title,
+  children,
 }: UserTokenProps) => {
   return (
     <Token
       position={position}
       color={color}
+      imageSrc={imageSrc}
       imageBounds={imageBounds}
       worldMapWidth={worldMapWidth}
       worldMapHeight={worldMapHeight}
@@ -61,7 +67,9 @@ export const UserToken = ({
       isMounted={isMounted}
       opacity={opacity}
       title={title}
-    />
+    >
+      {children}
+    </Token>
   );
 };
 

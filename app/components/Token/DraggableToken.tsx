@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { UserToken } from "./UserToken";
 import { usePosition } from "../../hooks/usePosition";
 import { ImageBounds, Position } from "../../types";
+import { TokenActionsMenu } from "./TokenActionsMenu";
+
+const LONG_PRESS_DELAY_MS = 600;
 
 interface TransformConfig {
   scale: number;
@@ -64,6 +67,15 @@ export const DraggableToken = ({
   const hasMovedRef = useRef(false);
   // Track if we should prevent click events (only if we actually dragged)
   const shouldPreventClickRef = useRef(false);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [movementValue, setMovementValue] = useState<string>("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const baseInputId = useId();
+  const movementInputId = `${baseInputId}-movement`;
+  const uploadInputId = `${baseInputId}-upload`;
 
   // Create a callback that updates this specific token's position
   const handlePositionUpdate = useCallback(
@@ -97,6 +109,32 @@ export const DraggableToken = ({
   );
 
   // Wrap handleMouseMove to track if mouse has moved (to distinguish click from drag)
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(longPressTimerRef.current);
+    }
+    longPressTimerRef.current = null;
+    longPressTriggeredRef.current = false;
+  }, []);
+
+  const triggerLongPress = useCallback(() => {
+    if (longPressTriggeredRef.current) return;
+    longPressTriggeredRef.current = true;
+    setIsMenuOpen(true);
+    shouldPreventClickRef.current = true;
+    clearLongPressTimer();
+    handleMouseUp();
+  }, [clearLongPressTimer, handleMouseUp]);
+
+  const startLongPressTimer = useCallback(() => {
+    if (!isInteractive || isMenuOpen) return;
+    if (typeof window === "undefined") return;
+    clearLongPressTimer();
+    longPressTimerRef.current = window.setTimeout(() => {
+      triggerLongPress();
+    }, LONG_PRESS_DELAY_MS);
+  }, [isInteractive, isMenuOpen, triggerLongPress, clearLongPressTimer]);
+
   const wrappedHandleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (dragStartPosRef.current) {
@@ -106,15 +144,17 @@ export const DraggableToken = ({
         if (dx > 5 || dy > 5) {
           hasMovedRef.current = true;
           shouldPreventClickRef.current = true;
+          clearLongPressTimer();
         }
       }
       handleMouseMove(e);
     },
-    [handleMouseMove]
+    [handleMouseMove, clearLongPressTimer]
   );
 
   // Wrap handleMouseUp to allow clicks to fire if no drag occurred
   const wrappedHandleMouseUp = useCallback(() => {
+    clearLongPressTimer();
     handleMouseUp();
     
     // Reset drag tracking (keep shouldPreventClickRef until click fires)
@@ -123,7 +163,20 @@ export const DraggableToken = ({
     
     // Don't reset shouldPreventClickRef here - let handleClick reset it
     // This ensures we can distinguish between clicks and drags when click fires
-  }, [handleMouseUp]);
+  }, [handleMouseUp, clearLongPressTimer]);
+
+  const wrappedHandleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      clearLongPressTimer();
+      handleTouchMove(e);
+    },
+    [clearLongPressTimer, handleTouchMove]
+  );
+
+  const wrappedHandleTouchEnd = useCallback(() => {
+    clearLongPressTimer();
+    handleTouchEnd();
+  }, [clearLongPressTimer, handleTouchEnd]);
 
   // Prevent dragging if not interactive, and handle clicks vs drags
   const handleInteractiveMouseDown = useCallback(
@@ -132,8 +185,7 @@ export const DraggableToken = ({
       if (e.button === 2) {
         return;
       }
-      
-      if (!isInteractive) return;
+      if (!isInteractive || isMenuOpen) return;
       
       // Prevent text selection during drag
       e.preventDefault();
@@ -142,15 +194,21 @@ export const DraggableToken = ({
       dragStartPosRef.current = { x: e.clientX, y: e.clientY };
       hasMovedRef.current = false;
       shouldPreventClickRef.current = false;
+      startLongPressTimer();
       
       handleMouseDown(e);
     },
-    [isInteractive, handleMouseDown]
+    [isInteractive, isMenuOpen, startLongPressTimer, handleMouseDown]
   );
 
   // Wrap onClick to prevent it if we actually dragged
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
+      if (isMenuOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       // Only prevent click if we actually dragged
       const shouldPrevent = shouldPreventClickRef.current;
       // Reset the flag now that we've checked it
@@ -166,15 +224,16 @@ export const DraggableToken = ({
         onClick(e);
       }
     },
-    [onClick]
+    [onClick, isMenuOpen]
   );
 
   const handleInteractiveTouchStart = useCallback(
     (e: React.TouchEvent) => {
-      if (!isInteractive) return;
+      if (!isInteractive || isMenuOpen) return;
+      startLongPressTimer();
       handleTouchStart(e);
     },
-    [isInteractive, handleTouchStart]
+    [isInteractive, isMenuOpen, startLongPressTimer, handleTouchStart]
   );
 
   // Notify parent of drag state changes
@@ -187,19 +246,19 @@ export const DraggableToken = ({
   // Store handlers in refs so we can attach them to document for global mouse tracking
   const handlersRef = useRef({
     handleMouseMove: wrappedHandleMouseMove,
-    handleTouchMove,
+    handleTouchMove: wrappedHandleTouchMove,
     handleMouseUp: wrappedHandleMouseUp,
-    handleTouchEnd,
+    handleTouchEnd: wrappedHandleTouchEnd,
   });
 
   useEffect(() => {
     handlersRef.current = {
       handleMouseMove: wrappedHandleMouseMove,
-      handleTouchMove,
+      handleTouchMove: wrappedHandleTouchMove,
       handleMouseUp: wrappedHandleMouseUp,
-      handleTouchEnd,
+      handleTouchEnd: wrappedHandleTouchEnd,
     };
-  }, [wrappedHandleMouseMove, handleTouchMove, wrappedHandleMouseUp, handleTouchEnd]);
+  }, [wrappedHandleMouseMove, wrappedHandleTouchMove, wrappedHandleMouseUp, wrappedHandleTouchEnd]);
 
   // Attach global mouse/touch handlers when dragging
   useEffect(() => {
@@ -244,22 +303,84 @@ export const DraggableToken = ({
       document.removeEventListener("mouseup", handleGlobalMouseUp);
       document.removeEventListener("touchend", handleGlobalTouchEnd);
     };
-  }, [isDragging]);
+  }, [isDragging, wrappedHandleMouseMove, wrappedHandleTouchMove, wrappedHandleMouseUp, wrappedHandleTouchEnd]);
 
   // Wrap onContextMenu handler
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
+      clearLongPressTimer();
       if (onContextMenu) {
         onContextMenu(e);
       }
     },
-    [onContextMenu]
+    [onContextMenu, clearLongPressTimer]
   );
+
+  const handleMovementChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    setMovementValue(event.target.value);
+  }, []);
+
+  const handleImageUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAvatarUrl(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  }, []);
+
+  const handleClearImage = useCallback(() => {
+    setAvatarUrl(null);
+  }, []);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+
+    const handleOutsidePress = (event: MouseEvent | TouchEvent) => {
+      if (!menuRef.current) return;
+      if (menuRef.current.contains(event.target as Node)) return;
+      setIsMenuOpen(false);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsidePress);
+    document.addEventListener("touchstart", handleOutsidePress);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsidePress);
+      document.removeEventListener("touchstart", handleOutsidePress);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMenuOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current !== null && typeof window !== "undefined") {
+        window.clearTimeout(longPressTimerRef.current);
+      }
+    };
+  }, []);
+
+  const transformScale = transform?.scale ?? 1;
+  const combinedScale = Math.max(0.01, transformScale * (gridScale ?? 1));
+  const dropdownScale = Math.min(2.5, Math.max(0.35, 1 / combinedScale));
+  const canDrag = isInteractive && !isMenuOpen;
 
   return (
     <UserToken
       position={position}
       color={color}
+      imageSrc={avatarUrl}
       imageBounds={imageBounds}
       worldMapWidth={worldMapWidth}
       worldMapHeight={worldMapHeight}
@@ -268,13 +389,27 @@ export const DraggableToken = ({
       isMounted={isMounted}
       opacity={opacity}
       title={title}
-      isInteractive={isInteractive}
+      isInteractive={canDrag}
       onMouseDown={handleInteractiveMouseDown}
       onTouchStart={handleInteractiveTouchStart}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
       zIndex={zIndex}
-    />
+    >
+      {isMenuOpen && (
+        <TokenActionsMenu
+          ref={menuRef}
+          movementInputId={movementInputId}
+          movementValue={movementValue}
+          onMovementChange={handleMovementChange}
+          uploadInputId={uploadInputId}
+          onImageUpload={handleImageUpload}
+          avatarUrl={avatarUrl}
+          onClearImage={handleClearImage}
+          dropdownScale={dropdownScale}
+        />
+      )}
+    </UserToken>
   );
 };
 

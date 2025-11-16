@@ -1,3 +1,4 @@
+import { ReactNode } from "react";
 import { Position, ImageBounds } from "../../types";
 import {
   getViewportPosition,
@@ -9,6 +10,7 @@ import { useCoordinateMapper } from "../../hooks/useCoordinateMapper";
 interface TokenProps {
   position: Position;
   color: string;
+  imageSrc?: string | null;
   imageBounds: ImageBounds | null;
   worldMapWidth?: number;
   worldMapHeight?: number;
@@ -28,11 +30,13 @@ interface TokenProps {
   isMounted?: boolean;
   opacity?: number;
   title?: string;
+  children?: ReactNode;
 }
 
 export const Token = ({
   position,
   color,
+  imageSrc,
   imageBounds,
   worldMapWidth = 0,
   worldMapHeight = 0,
@@ -47,6 +51,7 @@ export const Token = ({
   isMounted = true,
   opacity = 1.0,
   title,
+  children,
 }: TokenProps) => {
   const coordinateMapper = useCoordinateMapper(
     imageBounds,
@@ -147,7 +152,11 @@ export const Token = ({
         width: `${tokenSize}%`,
         aspectRatio: "1 / 1",
         transform: "translate(-50%, -50%)",
-        backgroundColor: color,
+        backgroundColor: imageSrc ? undefined : color,
+        backgroundImage: imageSrc ? `url(${imageSrc})` : undefined,
+        backgroundSize: imageSrc ? "cover" : undefined,
+        backgroundPosition: imageSrc ? "center" : undefined,
+        backgroundRepeat: imageSrc ? "no-repeat" : undefined,
         touchAction: isInteractive ? "none" : "auto",
         opacity: opacity,
         userSelect: "none",
@@ -159,7 +168,9 @@ export const Token = ({
       onTouchStart={onTouchStart}
       onClick={onClick}
       onContextMenu={onContextMenu}
-    />
+    >
+      {children}
+    </div>
   );
 };
 
