@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { useCharacter } from "@/app/providers/CharacterProvider";
 
 const DitherBackground = dynamic(() => import("@/components/Dither"), {
   ssr: false,
@@ -11,15 +12,25 @@ const DitherBackground = dynamic(() => import("@/components/Dither"), {
 
 interface LoadingScreenProps {
   isReady: boolean;
+  onEnterClick: () => void;
 }
 
-const MIN_VISIBLE_DURATION_MS = 10000;
+const MIN_VISIBLE_DURATION_MS = 5000;
 
-export const LoadingScreen = ({ isReady }: LoadingScreenProps) => {
+export const LoadingScreen = ({ isReady, onEnterClick }: LoadingScreenProps) => {
   const [isVisible, setIsVisible] = useState(true);
   const [shouldRender, setShouldRender] = useState(true);
   const [isDitherReady, setIsDitherReady] = useState(false);
   const visibleSinceRef = useRef<number>(0);
+  const {
+    pendingName,
+    setPendingName,
+    selectCharacter,
+    selectionError,
+    isResolving,
+    hasSelectedCharacter,
+    character,
+  } = useCharacter();
 
   useEffect(() => {
     if (isReady) {
@@ -115,6 +126,69 @@ export const LoadingScreen = ({ isReady }: LoadingScreenProps) => {
             Gathering heroes, aligning gridlines, and summoning the realm for play.
           </p>
         </div>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (isResolving) {
+              return;
+            }
+            const trimmedName = pendingName.trim();
+            if (!trimmedName) {
+              return;
+            }
+            const normalizedName = trimmedName.toLowerCase();
+            // If character is already selected and name matches (case-insensitive), just proceed
+            if (hasSelectedCharacter && character && character.name.toLowerCase() === normalizedName) {
+              onEnterClick();
+              return;
+            }
+            // Otherwise, select/load the character (using lowercase for processing)
+            void selectCharacter(normalizedName).then(() => {
+              onEnterClick();
+            });
+          }}
+          className="w-full max-w-sm space-y-3 text-left"
+        >
+          <label
+            htmlFor="loading-screen-character-name"
+            className="text-xs font-semibold uppercase tracking-wide text-red-100"
+          >
+            Who are you?
+          </label>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <input
+              id="loading-screen-character-name"
+              type="text"
+              value={pendingName}
+              onChange={(event) => setPendingName(event.target.value)}
+              className="flex-1 rounded-md border border-white/20 bg-white/5 px-3 py-2 text-sm text-center text-white placeholder:text-white/50 focus:border-red-300 focus:outline-none focus:ring-1 focus:ring-red-400"
+              disabled={isResolving}
+            />
+            <button
+              type="submit"
+              className="rounded-md border border-red-400/60 bg-red-600/80 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isResolving || !pendingName.trim()}
+            >
+              Enter
+            </button>
+          </div>
+          {selectionError && (
+            <p className="text-xs font-medium text-red-300">{selectionError}</p>
+          )}
+          {!selectionError && hasSelectedCharacter && character && (
+            <p className="text-xs text-emerald-200">
+              Welcome, <span className="font-semibold">{character.name}</span>. We&apos;ll load your
+              character sheet from the characters vault.
+            </p>
+          )}
+          {!selectionError && !hasSelectedCharacter && (
+            <p className="text-[0.65rem] text-red-200/80">
+              This name becomes your key inside the Supabase <code className="font-mono">characters</code>{" "}
+              table. We&apos;ll create it if it does not exist.
+            </p>
+          )}
+        </form>
       </div>
     </div>
   );

@@ -400,6 +400,7 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
           
           const data = await response.json();
           updateTokenImage(tokenId, data.publicUrl);
+          return data.publicUrl;
         }}
         transform={transform}
         onDragStateChange={() => {}}

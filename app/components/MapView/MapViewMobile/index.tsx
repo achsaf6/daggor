@@ -18,6 +18,7 @@ import { useHammerGestures } from "./hooks/useHammerGestures";
 import { TransformConfig } from "./types";
 import { DEFAULT_GRID_DATA } from "../../../utils/gridData";
 import { useBattlemap } from "../../../providers/BattlemapProvider";
+import { useCharacter } from "../../../providers/CharacterProvider";
 
 interface MapViewMobileProps {
   onReadyChange?: (isReady: boolean) => void;
@@ -37,6 +38,7 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     updateTokenImage,
     removeToken,
   } = useSocket(false);
+  const { character, hasSelectedCharacter } = useCharacter();
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const { currentBattlemap, isBattlemapLoading } = useBattlemap();
 
@@ -52,6 +54,25 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
       onReadyChange?.(false);
     };
   }, [onReadyChange]);
+
+  useEffect(() => {
+    if (!hasSelectedCharacter || !myUserId) {
+      return;
+    }
+    if (!character) {
+      return;
+    }
+    if (character.tokenImageUrl === myImageSrc) {
+      return;
+    }
+    updateTokenImage(myUserId, character.tokenImageUrl ?? null);
+  }, [
+    hasSelectedCharacter,
+    character,
+    myUserId,
+    myImageSrc,
+    updateTokenImage,
+  ]);
 
   const gridScale = currentBattlemap?.gridScale ?? 1;
   const gridOffsetX = currentBattlemap?.gridOffsetX ?? 0;
@@ -295,6 +316,7 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
                 
                 const data = await response.json();
                 updateTokenImage(tokenId, data.publicUrl);
+                return data.publicUrl;
               }}
               transform={transform as TransformConfig}
               onDragStateChange={handleDragStateChange}
@@ -334,6 +356,7 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
             
             const data = await response.json();
             updateTokenImage(tokenId, data.publicUrl);
+            return data.publicUrl;
           }}
           transform={transform as TransformConfig}
           onDragStateChange={handleDragStateChange}

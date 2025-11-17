@@ -35,7 +35,7 @@ interface DraggableTokenProps {
   onClick?: (e: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   onPositionUpdate: (tokenId: string, position: Position) => void;
-  onImageUpload?: (tokenId: string, file: File) => Promise<void>;
+  onImageUpload?: (tokenId: string, file: File) => Promise<string | null>;
   transform?: TransformConfig;
   onDragStateChange?: (tokenId: string, isDragging: boolean) => void;
   isInteractive?: boolean;
@@ -351,14 +351,15 @@ export const DraggableToken = ({
     });
     if (!currentOnImageUpload) {
       console.warn("onImageUpload is not defined for token:", tokenId);
-      return;
+      return null;
     }
     setIsUploading(true);
     setIsMenuOpen(false); // Close the dropdown when upload starts
     try {
       console.log("Calling onImageUpload prop with tokenId and file");
-      await currentOnImageUpload(tokenId, file);
-      console.log("onImageUpload completed successfully");
+      const imageUrl = await currentOnImageUpload(tokenId, file);
+      console.log("onImageUpload completed successfully", imageUrl);
+      return imageUrl ?? null;
     } catch (error) {
       console.error("Failed to upload token image:", error);
       throw error; // Re-throw so TokenActionsMenu can handle it

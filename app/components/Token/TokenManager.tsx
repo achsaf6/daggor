@@ -28,7 +28,7 @@ interface TokenManagerProps {
   myUserId?: string | null;
   onRemoveToken?: (persistentUserId: string) => void;
   onPositionUpdate: (tokenId: string, position: Position) => void;
-  onImageUpload?: (tokenId: string, file: File) => Promise<void>;
+  onImageUpload?: (tokenId: string, file: File) => Promise<string | null>;
   transform?: TransformConfig;
   onDragStateChange?: (tokenId: string, isDragging: boolean) => void;
 }
