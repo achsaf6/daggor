@@ -30,8 +30,6 @@ export const DraggableCover = ({
   const [isResizing, setIsResizing] = useState<string | null>(null); // 'nw', 'ne', 'sw', 'se'
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const coverStartPosRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
-  const hasMovedRef = useRef(false);
-  const lastClickTimeRef = useRef<number>(0);
   const isInteractive = isDraggable && typeof onPositionUpdate === "function";
   const canResize = isDraggable && typeof onSizeUpdate === "function";
 
@@ -77,6 +75,10 @@ export const DraggableCover = ({
   }
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) {
+      return;
+    }
+
     // Don't start dragging if clicking on a resize handle
     const target = e.target as HTMLElement;
     if (target.dataset.resizeHandle) {
@@ -88,7 +90,6 @@ export const DraggableCover = ({
     
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     coverStartPosRef.current = { x: cover.x, y: cover.y, width: cover.width, height: cover.height };
-    hasMovedRef.current = false;
     setIsDragging(true);
   };
 
@@ -169,11 +170,6 @@ export const DraggableCover = ({
         return;
       }
 
-      // Check if mouse has moved significantly (more than 5 pixels)
-      if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
-        hasMovedRef.current = true;
-      }
-
       // Convert delta from screen pixels to image-relative percentage
       const deltaXPercent = (deltaX / imageBounds.width) * 100;
       const deltaYPercent = (deltaY / imageBounds.height) * 100;
@@ -204,30 +200,11 @@ export const DraggableCover = ({
         return;
       }
 
-      const now = Date.now();
-      const wasClick = !hasMovedRef.current;
-      
       setIsDragging(false);
       dragStartRef.current = null;
       coverStartPosRef.current = null;
-
-      // If we didn't move much, treat it as a click (for double-click removal)
-      if (wasClick && onRemoveCover) {
-        const timeSinceLastClick = now - lastClickTimeRef.current;
-        if (timeSinceLastClick < 300) {
-          // Double-click detected (within 300ms)
-          onRemoveCover(cover.id);
-          lastClickTimeRef.current = 0;
-        } else {
-          lastClickTimeRef.current = now;
-        }
-      } else {
-        lastClickTimeRef.current = 0;
-      }
-
-      hasMovedRef.current = false;
     },
-    [isDragging, isResizing, cover.id, onRemoveCover]
+    [isDragging, isResizing]
   );
 
   // Set up global mouse event listeners when dragging or resizing
@@ -244,6 +221,21 @@ export const DraggableCover = ({
       document.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (!onRemoveCover) {
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (isDragging || isResizing) {
+      return;
+    }
+
+    onRemoveCover(cover.id);
+  };
 
   const handleSize = 8; // Size of resize handles in pixels
 
@@ -264,7 +256,8 @@ export const DraggableCover = ({
         zIndex: isDragging || isResizing ? 5 : 5,
       }}
       onMouseDown={handleMouseDown}
-      title="Drag to move, drag corners to resize, double-click to remove"
+      onContextMenu={handleContextMenu}
+      title="Drag to move, drag corners to resize, right-click to remove"
     >
       {canResize && (
         <>
@@ -321,4 +314,5 @@ export const DraggableCover = ({
     </div>
   );
 };
+
 
