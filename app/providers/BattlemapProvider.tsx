@@ -69,6 +69,8 @@ interface BattlemapContextValue {
   addCover: (cover: Omit<Cover, "id"> & { id?: string }) => Promise<Cover | null>;
   updateCover: (id: string, updates: Partial<Cover>) => Promise<void>;
   removeCover: (id: string) => Promise<void>;
+  reorderBattlemaps: (orderedIds: string[]) => Promise<void>;
+  canManageBattlemaps: boolean;
 }
 
 interface BattlemapPayload {
@@ -235,6 +237,46 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       });
     });
   }, []);
+
+  const reorderBattlemaps = useCallback(
+    async (orderedIds: string[]) => {
+      if (!allowBattlemapMutations || !Array.isArray(orderedIds) || orderedIds.length === 0) {
+        return;
+      }
+
+      if (
+        orderedIds.length !== battlemaps.length ||
+        new Set(orderedIds).size !== battlemaps.length ||
+        !battlemaps.every((battlemap) => orderedIds.includes(battlemap.id))
+      ) {
+        console.warn("[BattlemapProvider] Ignoring invalid battlemap reorder request");
+        return;
+      }
+
+      const previousOrder = battlemaps;
+      const mapping = new Map(previousOrder.map((battlemap) => [battlemap.id, battlemap]));
+
+      setBattlemaps(
+        orderedIds
+          .map((id) => mapping.get(id))
+          .filter((battlemap): battlemap is BattlemapSummary => Boolean(battlemap))
+      );
+
+      setIsMutating(true);
+      setError(null);
+
+      try {
+        await emitWithAck("battlemap:reorder", { orderedIds });
+      } catch (reorderError) {
+        console.error("Failed to reorder battlemaps", reorderError);
+        setError("Failed to reorder battlemaps");
+        setBattlemaps(previousOrder);
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [allowBattlemapMutations, battlemaps, emitWithAck]
+  );
 
   useEffect(() => {
     if (!isMounted) {
@@ -668,6 +710,8 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       addCover,
       updateCover,
       removeCover,
+      reorderBattlemaps,
+      canManageBattlemaps: allowBattlemapMutations,
     }),
     [
       battlemaps,
@@ -689,6 +733,8 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       addCover,
       updateCover,
       removeCover,
+      reorderBattlemaps,
+      allowBattlemapMutations,
     ]
   );
 

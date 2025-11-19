@@ -1,7 +1,65 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  arrayMove,
+  verticalListSortingStrategy,
+  sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useBattlemap } from "../../providers/BattlemapProvider";
+
+interface BattlemapListItem {
+  id: string;
+  name: string;
+  mapPath: string | null;
+}
+
+const DragHandleIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    aria-hidden="true"
+  >
+    <path d="M3 4h10" />
+    <path d="M3 8h10" />
+    <path d="M3 12h10" />
+  </svg>
+);
+
+const MapBadgeIcon = () => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="text-white/80"
+    aria-hidden="true"
+  >
+    <path d="M3 7l6-3 6 3 6-3v13l-6 3-6-3-6 3z" />
+    <path d="M9 4v13m6-10v13" />
+  </svg>
+);
 
 interface BattlemapManagerProps {
   onClose?: () => void;
@@ -20,6 +78,8 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
     renameBattlemap,
     updateBattlemapMapPath,
     createBattlemap,
+    reorderBattlemaps,
+    canManageBattlemaps,
   } = useBattlemap();
 
   const [nameValue, setNameValue] = useState<string>(currentBattlemap?.name ?? "");
@@ -115,7 +175,7 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
   };
 
 
-  const availableBattlemaps = useMemo(() => {
+  const availableBattlemaps: BattlemapListItem[] = useMemo(() => {
     if (isListLoading) {
       return [];
     }
@@ -123,6 +183,39 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
   }, [battlemaps, isListLoading]);
 
   const disabled = isBattlemapLoading || isMutating;
+  const dragEnabled =
+    canManageBattlemaps && !isListLoading && !disabled && availableBattlemaps.length > 1;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (!dragEnabled) {
+        return;
+      }
+
+      const { active, over } = event;
+      if (!over || active.id === over.id) {
+        return;
+      }
+
+      const oldIndex = availableBattlemaps.findIndex((battlemap) => battlemap.id === active.id);
+      const newIndex = availableBattlemaps.findIndex((battlemap) => battlemap.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) {
+        return;
+      }
+
+      const reordered = arrayMove(availableBattlemaps, oldIndex, newIndex);
+
+      setStatusMessage("Updating battlemap order…");
+      void reorderBattlemaps(reordered.map((battlemap) => battlemap.id));
+    },
+    [availableBattlemaps, dragEnabled, reorderBattlemaps, setStatusMessage]
+  );
 
   return (
     <div
@@ -153,26 +246,49 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
 
       <div className="space-y-2">
         <label className="block text-xs uppercase tracking-wide text-white/60">
-          Active Battlemap
+          Active Battlemaps
         </label>
-        <select
-          value={currentBattlemapId ?? ""}
-          onChange={(event) => selectBattlemap(event.target.value)}
-          disabled={isListLoading || disabled}
-          className="w-full bg-black/40 border border-white/20 rounded-md px-2 py-2 text-white focus:outline-none focus:ring-1 focus:ring-white/40 disabled:opacity-50"
-        >
-          {isListLoading ? (
-            <option value="">Loading…</option>
-          ) : availableBattlemaps.length > 0 ? (
-            availableBattlemaps.map((battlemap) => (
-              <option key={battlemap.id} value={battlemap.id}>
-                {battlemap.name || "Untitled Battlemap"}
-              </option>
-            ))
-          ) : (
-            <option value="">No battlemaps</option>
-          )}
-        </select>
+
+        {isListLoading ? (
+          <div className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white/70">
+            Loading battlemaps…
+          </div>
+        ) : availableBattlemaps.length === 0 ? (
+          <div className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white/60">
+            No battlemaps available yet.
+          </div>
+        ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={availableBattlemaps.map((battlemap) => battlemap.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {availableBattlemaps.map((battlemap) => (
+                  <SortableBattlemapRow
+                    key={battlemap.id}
+                    battlemap={battlemap}
+                    isActive={battlemap.id === currentBattlemapId}
+                    disabled={disabled}
+                    dragEnabled={dragEnabled}
+                    onSelect={selectBattlemap}
+                  />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
+        )}
+        {!canManageBattlemaps ? (
+          <p className="text-xs text-white/40">
+            Only the display host can reorder battlemaps.
+          </p>
+        ) : dragEnabled ? (
+          <p className="text-xs text-white/40">Drag the handle beside a map to change its order.</p>
+        ) : null}
       </div>
 
       <div className="space-y-2">
@@ -219,7 +335,7 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
           </button>
         </div>
         <p className="text-xs text-white/40">
-          Drop in any image file—it's uploaded to Supabase storage and referenced automatically.
+          Drop in any image file—it&apos;s uploaded to Supabase storage and referenced automatically.
         </p>
       </div>
 
@@ -249,4 +365,83 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
   );
 };
 
+
+interface SortableBattlemapRowProps {
+  battlemap: BattlemapListItem;
+  isActive: boolean;
+  disabled: boolean;
+  dragEnabled: boolean;
+  onSelect: (battlemapId: string) => void;
+}
+
+const SortableBattlemapRow = ({
+  battlemap,
+  isActive,
+  disabled,
+  dragEnabled,
+  onSelect,
+}: SortableBattlemapRowProps) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: battlemap.id,
+    disabled: !dragEnabled,
+  });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const dragHandleProps =
+    dragEnabled && !disabled
+      ? {
+          ...attributes,
+          ...listeners,
+        }
+      : undefined;
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-stretch gap-2 rounded-lg border border-white/15 bg-black/30 p-2 transition ${
+        isDragging ? "bg-white/10 shadow-lg" : ""
+      }`}
+    >
+      <button
+        type="button"
+        onClick={() => onSelect(battlemap.id)}
+        disabled={disabled}
+        className={`flex flex-1 items-center gap-3 rounded-md px-2 py-1 text-left transition ${
+          isActive ? "bg-white/10" : ""
+        } ${disabled ? "opacity-60" : "hover:bg-white/5"}`}
+      >
+        <span className="flex h-10 w-10 items-center justify-center rounded-md bg-gradient-to-br from-emerald-500/40 to-cyan-500/30">
+          <MapBadgeIcon />
+        </span>
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <span className="text-sm font-medium text-white">
+            {battlemap.name || "Untitled Battlemap"}
+          </span>
+          <span className="text-xs text-white/40 truncate">
+            {battlemap.mapPath ? battlemap.mapPath : "No image uploaded"}
+          </span>
+        </div>
+        {isActive ? (
+          <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">
+            Active
+          </span>
+        ) : null}
+      </button>
+      <div
+        {...dragHandleProps}
+        className={`flex items-center rounded-md px-2 text-white/60 transition ${
+          dragEnabled ? "cursor-grab hover:text-white" : "cursor-not-allowed opacity-30"
+        }`}
+        aria-label={dragEnabled ? "Drag to reorder" : "Reordering disabled"}
+      >
+        <DragHandleIcon />
+      </div>
+    </li>
+  );
+};
 

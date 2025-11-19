@@ -37,6 +37,18 @@ const battlemapState = {
   activeBattlemapId: null,
 };
 
+const persistBattlemapOrder = (orderedIds) => {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return Promise.resolve();
+  }
+
+  return Promise.all(
+    orderedIds.map((battlemapId, index) =>
+      supabase.from('battlemaps').update({ sort_index: index }).eq('id', battlemapId)
+    )
+  );
+};
+
 const getDefaultBattlemapId = () => {
   for (const id of battlemapState.order) {
     const battlemap = battlemapState.maps.get(id);
@@ -135,9 +147,11 @@ const loadBattlemapStateFromSupabase = async () => {
         grid_scale,
         grid_offset_x,
         grid_offset_y,
-        grid_data
+        grid_data,
+        sort_index
       `
     )
+    .order('sort_index', { ascending: true })
     .order('created_at', { ascending: true });
 
   if (error) {
@@ -154,6 +168,7 @@ const loadBattlemapStateFromSupabase = async () => {
         grid_offset_x: DEFAULT_SETTINGS.gridOffsetX,
         grid_offset_y: DEFAULT_SETTINGS.gridOffsetY,
         grid_data: DEFAULT_BATTLEMAP_GRID_DATA,
+        sort_index: 0,
       })
       .select(
         `
@@ -306,7 +321,7 @@ app.prepare().then(async () => {
     io.emit('battlemap:deleted', { battlemapId });
   };
 
-  const insertBattlemapRow = (battlemap) =>
+  const insertBattlemapRow = (battlemap, sortIndex = 0) =>
     supabase.from('battlemaps').insert({
       id: battlemap.id,
       name: battlemap.name,
@@ -315,6 +330,7 @@ app.prepare().then(async () => {
       grid_offset_x: battlemap.gridOffsetX,
       grid_offset_y: battlemap.gridOffsetY,
       grid_data: battlemap.gridData,
+      sort_index: sortIndex,
     });
 
   const updateBattlemapRow = (battlemapId) => {
@@ -572,6 +588,7 @@ app.prepare().then(async () => {
         covers: new Map(),
       };
 
+      const newSortIndex = battlemapState.order.length;
       battlemapState.order.push(battlemapId);
       battlemapState.maps.set(battlemapId, newBattlemap);
 
@@ -584,7 +601,7 @@ app.prepare().then(async () => {
       }
       emitBattlemapUpdate(battlemapId);
 
-      runBackgroundTask('insert battlemap', () => insertBattlemapRow(newBattlemap));
+      runBackgroundTask('insert battlemap', () => insertBattlemapRow(newBattlemap, newSortIndex));
     });
 
     socket.on('battlemap:set-active', (payload, ack) => {
@@ -630,6 +647,34 @@ app.prepare().then(async () => {
       broadcastBattlemapList();
       emitBattlemapUpdate(battlemap.id);
       runBackgroundTask('update battlemap name', () => updateBattlemapRow(battlemap.id));
+    });
+
+    socket.on('battlemap:reorder', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:reorder', ack)) {
+        return;
+      }
+
+      const orderedIds = Array.isArray(payload?.orderedIds) ? payload.orderedIds : null;
+      if (!orderedIds || orderedIds.length !== battlemapState.order.length) {
+        respond(ack, { ok: false, error: 'invalid-order' });
+        return;
+      }
+
+      const seen = new Set();
+      for (const id of orderedIds) {
+        if (typeof id !== 'string' || !battlemapState.maps.has(id) || seen.has(id)) {
+          respond(ack, { ok: false, error: 'invalid-order' });
+          return;
+        }
+        seen.add(id);
+      }
+
+      battlemapState.order = [...orderedIds];
+
+      logEvent('Reordered battlemaps', battlemapState.order);
+      respond(ack, { ok: true });
+      broadcastBattlemapList();
+      runBackgroundTask('persist battlemap order', () => persistBattlemapOrder(battlemapState.order));
     });
 
     socket.on('battlemap:update-map-path', (payload, ack) => {
@@ -729,6 +774,7 @@ app.prepare().then(async () => {
       respond(ack, { ok: true });
       broadcastBattlemapList();
       emitBattlemapDeleted(battlemap.id);
+      runBackgroundTask('persist battlemap order', () => persistBattlemapOrder(battlemapState.order));
 
       runBackgroundTask('delete battlemap', async () => {
         await deleteCoversForBattlemap(battlemap.id);
