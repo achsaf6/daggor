@@ -81,10 +81,9 @@ export const useCoordinateMapper = (
 
     return {
       screenToWorldMap: (screenPos: ScreenPosition): WorldMapPosition | null => {
-        // Use uniform scale (same as grid rendering and token positioning) for consistency
-        // Convert screen coordinates to world map coordinates using uniform scale
-        const worldX = (screenPos.x - imageBounds.left) / sizeScale;
-        const worldY = (screenPos.y - imageBounds.top) / sizeScale;
+        // Convert screen coordinates to world map coordinates using axis-specific scaling
+        const worldX = (screenPos.x - imageBounds.left) / scaleX;
+        const worldY = (screenPos.y - imageBounds.top) / scaleY;
         
         // Clamp to world map bounds
         if (worldX < 0 || worldX > worldMapWidth || worldY < 0 || worldY > worldMapHeight) {
@@ -95,18 +94,17 @@ export const useCoordinateMapper = (
       },
 
       worldMapToScreen: (worldPos: WorldMapPosition): ScreenPosition | null => {
-        // Use uniform scale (same as grid rendering and token positioning) for consistency
-        const screenX = imageBounds.left + worldPos.x * sizeScale;
-        const screenY = imageBounds.top + worldPos.y * sizeScale;
+        // Convert world map coordinates to screen pixels using axis-specific scaling
+        const screenX = imageBounds.left + worldPos.x * scaleX;
+        const screenY = imageBounds.top + worldPos.y * scaleY;
         
         return { x: screenX, y: screenY };
       },
 
       screenToImageRelative: (screenPos: ScreenPosition): ImageRelativePosition | null => {
-        // Use uniform scale (same as grid rendering and token positioning) for consistency
-        // Convert screen coordinates to world coordinates, then to percentage
-        const worldX = (screenPos.x - imageBounds.left) / sizeScale;
-        const worldY = (screenPos.y - imageBounds.top) / sizeScale;
+        // Convert screen coordinates to image-relative percentages using axis-specific scaling
+        const worldX = (screenPos.x - imageBounds.left) / scaleX;
+        const worldY = (screenPos.y - imageBounds.top) / scaleY;
         
         // Convert to percentage
         const relativeX = (worldX / worldMapWidth) * 100;
@@ -124,14 +122,12 @@ export const useCoordinateMapper = (
       },
 
       imageRelativeToScreen: (imagePos: ImageRelativePosition): ScreenPosition | null => {
-        // Use uniform scale (same as grid rendering) to ensure tokens align with grid squares
-        // Convert percentage to world pixels, then to screen using uniform scale
+        // Convert percentage to screen pixels using axis-specific scaling
         const worldX = (imagePos.x / 100) * worldMapWidth;
         const worldY = (imagePos.y / 100) * worldMapHeight;
         
-        // Use uniform scale (minimum of scaleX and scaleY) to match grid rendering
-        const screenX = imageBounds.left + worldX * sizeScale;
-        const screenY = imageBounds.top + worldY * sizeScale;
+        const screenX = imageBounds.left + worldX * scaleX;
+        const screenY = imageBounds.top + worldY * scaleY;
         
         return { x: screenX, y: screenY };
       },
