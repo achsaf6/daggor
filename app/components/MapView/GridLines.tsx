@@ -46,7 +46,9 @@ export const GridLines = ({
   const generateScaledLines = (
     originalLines: number[],
     dimension: number,
-    centerPoint: number
+    centerPoint: number,
+    extraPositive: number = 0,
+    extraNegative: number = 0
   ): number[] => {
     if (originalLines.length === 0) return [];
     
@@ -67,14 +69,16 @@ export const GridLines = ({
     
     // Generate lines going right/down from center (positive coordinates)
     let pos = centerPoint + scaledSpacing;
-    while (pos < dimension + scaledSpacing) {
+    const positiveLimit = dimension + extraPositive + scaledSpacing;
+    while (pos < positiveLimit) {
       scaledLines.push(pos);
       pos += scaledSpacing;
     }
     
     // Generate lines going left/up from center (negative coordinates)
     pos = centerPoint - scaledSpacing;
-    while (pos >= -scaledSpacing) {
+    const negativeLimit = -extraNegative - scaledSpacing;
+    while (pos >= negativeLimit) {
       scaledLines.push(pos);
       pos -= scaledSpacing;
     }
@@ -86,21 +90,62 @@ export const GridLines = ({
   const centerX = imageWidth / 2;
   const centerY = imageHeight / 2;
 
-  // Apply scale to grid lines (centered)
-  const scaledVerticalLines = generateScaledLines(verticalLines, imageWidth, centerX);
-  const scaledHorizontalLines = generateScaledLines(horizontalLines, imageHeight, centerY);
-
-  // Apply offset to grid lines
-  const offsetVerticalLines = scaledVerticalLines.map(line => line + gridOffsetX);
-  const offsetHorizontalLines = scaledHorizontalLines.map(line => line + gridOffsetY);
-
   // Use coordinate mapper for proper scaling, fallback to direct calculation if not ready
+  // Use uniform scale (minimum of X and Y) to ensure grid cells are always squares
   const scaleX = coordinateMapper.isReady 
     ? coordinateMapper.getScaleX() 
     : imageBounds.width / imageWidth;
   const scaleY = coordinateMapper.isReady 
     ? coordinateMapper.getScaleY() 
     : imageBounds.height / imageHeight;
+  // Use the minimum scale to ensure squares regardless of image aspect ratio
+  const uniformScale = Math.min(scaleX, scaleY);
+
+  const calculateCoverageExtras = (
+    imageSize: number,
+    boundsSize: number,
+    offset: number
+  ) => {
+    const worldSizeNeeded =
+      uniformScale > 0 ? boundsSize / uniformScale : imageSize;
+    const shortfall = Math.max(0, worldSizeNeeded - imageSize);
+
+    return {
+      extraPositive: shortfall + Math.max(0, -offset),
+      extraNegative: Math.max(0, offset),
+    };
+  };
+
+  const verticalExtras = calculateCoverageExtras(
+    imageWidth,
+    imageBounds.width,
+    gridOffsetX
+  );
+  const horizontalExtras = calculateCoverageExtras(
+    imageHeight,
+    imageBounds.height,
+    gridOffsetY
+  );
+
+  // Apply scale to grid lines (centered) and extend coverage as needed
+  const scaledVerticalLines = generateScaledLines(
+    verticalLines,
+    imageWidth,
+    centerX,
+    verticalExtras.extraPositive,
+    verticalExtras.extraNegative
+  );
+  const scaledHorizontalLines = generateScaledLines(
+    horizontalLines,
+    imageHeight,
+    centerY,
+    horizontalExtras.extraPositive,
+    horizontalExtras.extraNegative
+  );
+
+  // Apply offset to grid lines
+  const offsetVerticalLines = scaledVerticalLines.map(line => line + gridOffsetX);
+  const offsetHorizontalLines = scaledHorizontalLines.map(line => line + gridOffsetY);
 
   return (
     <svg
@@ -123,9 +168,9 @@ export const GridLines = ({
       {offsetVerticalLines.map((x, index) => (
         <line
           key={`v-${index}`}
-          x1={x * scaleX}
+          x1={x * uniformScale}
           y1={0}
-          x2={x * scaleX}
+          x2={x * uniformScale}
           y2={imageBounds.height}
           stroke="rgba(255, 255, 255, 0.3)"
           strokeWidth="1"
@@ -138,9 +183,9 @@ export const GridLines = ({
         <line
           key={`h-${index}`}
           x1={0}
-          y1={y * scaleY}
+          y1={y * uniformScale}
           x2={imageBounds.width}
-          y2={y * scaleY}
+          y2={y * uniformScale}
           stroke="rgba(255, 255, 255, 0.3)"
           strokeWidth="1"
           fill="none"
