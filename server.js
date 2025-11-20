@@ -1142,7 +1142,7 @@ app.prepare().then(async () => {
       }
 
       covers.set(id, nextCover);
-      io.emit('cover-updated', nextCover);
+      io.broadcast.emit('cover-updated', nextCover);
     });
   });
 
