@@ -219,7 +219,7 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
 
   return (
     <div
-      className="text-white text-sm space-y-4"
+      className="text-white text-sm space-y-4 overflow-y-auto max-h-[70vh] pr-2"
       onClick={(event) => event.stopPropagation()}
     >
       <div className="flex items-center justify-between">
@@ -267,7 +267,7 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
               items={availableBattlemaps.map((battlemap) => battlemap.id)}
               strategy={verticalListSortingStrategy}
             >
-              <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              <ul className="space-y-2 max-h-[25vh] overflow-y-auto pr-1">
                 {availableBattlemaps.map((battlemap) => (
                   <SortableBattlemapRow
                     key={battlemap.id}
@@ -407,6 +407,15 @@ const SortableBattlemapRow = ({
         isDragging ? "bg-white/10 shadow-lg" : ""
       }`}
     >
+      <div
+        {...dragHandleProps}
+        className={`flex items-center rounded-md px-2 text-white/60 transition ${
+          dragEnabled ? "cursor-grab hover:text-white" : "cursor-not-allowed opacity-30"
+        }`}
+        aria-label={dragEnabled ? "Drag to reorder" : "Reordering disabled"}
+      >
+        <DragHandleIcon />
+      </div>
       <button
         type="button"
         onClick={() => onSelect(battlemap.id)}
@@ -432,15 +441,6 @@ const SortableBattlemapRow = ({
           </span>
         ) : null}
       </button>
-      <div
-        {...dragHandleProps}
-        className={`flex items-center rounded-md px-2 text-white/60 transition ${
-          dragEnabled ? "cursor-grab hover:text-white" : "cursor-not-allowed opacity-30"
-        }`}
-        aria-label={dragEnabled ? "Drag to reorder" : "Reordering disabled"}
-      >
-        <DragHandleIcon />
-      </div>
     </li>
   );
 };

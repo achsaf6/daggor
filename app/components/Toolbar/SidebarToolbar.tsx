@@ -164,7 +164,7 @@ export const SidebarToolbar = ({
         </button>
 
         {isMapManagerOpen && (
-          <div className="absolute left-full ml-2 top-0 bg-black/80 backdrop-blur-sm rounded-lg p-4 shadow-lg border border-white/20 min-w-[320px]">
+          <div className="absolute left-full ml-2 top-0 bg-black/80 backdrop-blur-sm rounded-lg p-4 shadow-lg border border-white/20 w-[400px] max-h-[70vh] overflow-hidden flex flex-col">
             <BattlemapManager onClose={() => setIsMapManagerOpen(false)} />
           </div>
         )}
