@@ -1,6 +1,11 @@
 import { ImageBounds } from '../../types';
 import { useCoordinateMapper } from '../../hooks/useCoordinateMapper';
 
+export const getRelativeImageOffsets = (imageBounds: ImageBounds) => ({
+  left: imageBounds.left - imageBounds.containerLeft,
+  top: imageBounds.top - imageBounds.containerTop,
+});
+
 interface GridLinesProps {
   gridData: {
     verticalLines: number[];
@@ -147,12 +152,14 @@ export const GridLines = ({
   const offsetVerticalLines = scaledVerticalLines.map(line => line + gridOffsetX);
   const offsetHorizontalLines = scaledHorizontalLines.map(line => line + gridOffsetY);
 
+  const relativeOffsets = getRelativeImageOffsets(imageBounds);
+
   return (
     <svg
       className="absolute pointer-events-none"
       style={{
-        left: `${imageBounds.left}px`,
-        top: `${imageBounds.top}px`,
+        left: `${relativeOffsets.left}px`,
+        top: `${relativeOffsets.top}px`,
         width: `${imageBounds.width}px`,
         height: `${imageBounds.height}px`,
         isolation: 'isolate',
