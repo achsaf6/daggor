@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { PanState } from "../types";
 
-const MIN_ZOOM = 1.0;
-const MAX_ZOOM = 5.0;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 8.0;
 const INITIAL_ZOOM = 2.5;
 
 export const usePanZoom = () => {
