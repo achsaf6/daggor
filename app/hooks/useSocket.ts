@@ -156,6 +156,7 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
         imageSrc?: string | null;
         size?: TokenSize;
       }) => {
+        console.log("DEBUG: user-connected")
         setMyUserId(data.userId);
         myUserIdRef.current = data.userId;
         setMyColor(data.color);
@@ -168,7 +169,7 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     // Receive all existing users
     socketInstance.on("all-users", (users: UserWithPersistentId[]) => {
       const usersMap = new Map<string, User>();
-      const currentMyUserId = socketInstance.id;
+      const currentMyUserId = myUserIdRef.current || socketInstance.id;
       users.forEach((user) => {
         if (user.id !== currentMyUserId) {
           // Preserve persistentUserId if it exists
@@ -334,11 +335,14 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     });
 
     // Handle disconnected users list (for display mode users to track)
-    socketInstance.on("disconnected-users", (disconnectedUsersList: User[]) => {
+    socketInstance.on("disconnected-users", (disconnectedUsersList: UserWithPersistentId[]) => {
       // Store disconnected users so their tokens remain visible
+      // Use persistentUserId as key for consistency with user-disconnected handler
       const disconnectedMap = new Map<string, User>();
       disconnectedUsersList.forEach((user) => {
-        disconnectedMap.set(user.id, user);
+        const userWithPersistentId = user as UserWithPersistentId;
+        const key = userWithPersistentId.persistentUserId || user.id;
+        disconnectedMap.set(key, user);
       });
       setDisconnectedUsers(disconnectedMap);
     });
@@ -397,7 +401,8 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
           const updated = new Map(prev);
           for (const [key, user] of updated.entries()) {
             const userWithPersistentId = user as UserWithPersistentId;
-            if (userWithPersistentId.persistentUserId === data.userId || user.id === data.userId) {
+            // Check both by userId and persistentUserId since keys might be either
+            if (user.id === data.userId || userWithPersistentId.persistentUserId === data.userId || key === data.userId) {
               updated.set(key, {
                 ...user,
                 imageSrc: data.imageSrc,
@@ -433,21 +438,15 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
 
         setDisconnectedUsers((prev) => {
           const updated = new Map(prev);
-          const current = updated.get(data.userId);
-          if (current) {
-            updated.set(data.userId, {
-              ...current,
-              size: data.size,
-            });
-          } else {
-            for (const [key, user] of updated.entries()) {
-              const withPersistent = user as UserWithPersistentId;
-              if (withPersistent.persistentUserId === data.userId) {
-                updated.set(key, {
-                  ...user,
-                  size: data.size,
-                });
-              }
+          // Search for the user by userId or persistentUserId since keys might be either
+          for (const [key, user] of updated.entries()) {
+            const withPersistent = user as UserWithPersistentId;
+            if (user.id === data.userId || withPersistent.persistentUserId === data.userId || key === data.userId) {
+              updated.set(key, {
+                ...user,
+                size: data.size,
+              });
+              break;
             }
           }
           return updated;
@@ -594,22 +593,15 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
 
     setDisconnectedUsers((prev) => {
       const updated = new Map(prev);
-      const existing = updated.get(tokenId);
-      if (existing) {
-        updated.set(tokenId, {
-          ...existing,
-          size,
-        });
-      } else {
-        for (const [key, user] of updated.entries()) {
-          const withPersistent = user as UserWithPersistentId;
-          if (withPersistent.persistentUserId === tokenId) {
-            updated.set(key, {
-              ...user,
-              size,
-            });
-            break;
-          }
+      // Search for the user by userId or persistentUserId since keys might be either
+      for (const [key, user] of updated.entries()) {
+        const withPersistent = user as UserWithPersistentId;
+        if (user.id === tokenId || withPersistent.persistentUserId === tokenId || key === tokenId) {
+          updated.set(key, {
+            ...user,
+            size,
+          });
+          break;
         }
       }
       return updated;
