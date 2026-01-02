@@ -67,8 +67,8 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
   const generateCoverId = () =>
     `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
+  // Get or create persistent user ID from localStorage
   useEffect(() => {
-    // Get or create persistent user ID from localStorage
     const getPersistentUserId = (): string => {
       if (typeof window === "undefined") {
         return `temp-${Date.now()}-${Math.random()}`;

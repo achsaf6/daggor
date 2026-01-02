@@ -433,21 +433,44 @@ app.prepare().then(async () => {
     sendBattlemapList();
     sendActiveBattlemap();
 
+    const findDisconnectedUser = (persistentId, fallbackId) => {
+      if (persistentId && disconnectedUsers.has(persistentId)) {
+        return { key: persistentId, value: disconnectedUsers.get(persistentId) };
+      }
+      // Fallback: search by stored persistentUserId field
+      for (const [key, value] of disconnectedUsers.entries()) {
+        if (value?.persistentUserId === persistentId || (fallbackId && key === fallbackId)) {
+          return { key, value };
+        }
+      }
+      return null;
+    };
+
     // Function to initialize user
     const initializeUser = (data) => {
-      if (identificationReceived) return; // Prevent double initialization
+      const incomingPersistentId =
+        typeof data?.persistentUserId === 'string' && data.persistentUserId.trim() !== ''
+          ? data.persistentUserId
+          : null;
+
+      // If we already initialized but a later identify brings a real persistent ID, update it
+      if (identificationReceived) {
+        if (incomingPersistentId && userData && userData.persistentUserId !== incomingPersistentId) {
+          userData.persistentUserId = incomingPersistentId;
+        }
+        return;
+      }
+
       identificationReceived = true;
 
-      const persistentUserId = data?.persistentUserId || null;
+      const persistentUserId = incomingPersistentId || userId;
       let restoredUserData = null;
 
       // Check if this user was previously disconnected (in-memory only)
-      if (persistentUserId) {
-        const disconnectedUser = disconnectedUsers.get(persistentUserId);
-        if (disconnectedUser) {
-          restoredUserData = disconnectedUser;
-          disconnectedUsers.delete(persistentUserId);
-        }
+      const match = findDisconnectedUser(persistentUserId, incomingPersistentId ? null : userId);
+      if (match) {
+        restoredUserData = match.value;
+        disconnectedUsers.delete(match.key);
       }
 
       // Use restored data or create new user
@@ -464,7 +487,7 @@ app.prepare().then(async () => {
 
       userData = {
         id: userId,
-        persistentUserId: persistentUserId || userId, // Use persistent ID if available
+        persistentUserId, // Always store under the persistent ID
         color,
         position,
         size,
@@ -496,7 +519,6 @@ app.prepare().then(async () => {
         imageSrc: userData.imageSrc || null,
         size,
       });
-
       // Send all active users (excluding display mode users)
       // Filter out any display mode users that might have been added
       const activeUsersList = Array.from(users.values()).filter(user => !user.isDisplay);
@@ -550,7 +572,7 @@ app.prepare().then(async () => {
       if (!identificationReceived) {
         initializeUser({});
       }
-    }, 1000);
+    }, 5000);
 
     socket.on('battlemap:get', (payload, ack) => {
       const battlemapId = payload?.battlemapId;
@@ -967,7 +989,6 @@ app.prepare().then(async () => {
 
         disconnectedUsers.set(persistentId, disconnectedUserData);
         users.delete(userId);
-
         // Broadcast to all other clients with color and position
         socket.broadcast.emit('user-disconnected', {
           userId,

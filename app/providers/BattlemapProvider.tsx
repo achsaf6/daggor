@@ -100,6 +100,19 @@ const getWebSocketUrl = () => {
   return "http://localhost:3000";
 };
 
+const getPersistentUserId = () => {
+  if (typeof window === "undefined") {
+    return `temp-${Date.now()}-${Math.random()}`;
+  }
+  const stored = localStorage.getItem("persistentUserId");
+  if (stored) {
+    return stored;
+  }
+  const newId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  localStorage.setItem("persistentUserId", newId);
+  return newId;
+};
+
 const parseCover = (input: Partial<Cover> | null | undefined): Cover | null => {
   if (!input || typeof input !== "object" || typeof input.id !== "string") {
     return null;
@@ -188,6 +201,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
 
   const socketRef = useRef<Socket | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistentUserIdRef = useRef<string | null>(null);
 
   const clearDebounceTimer = useCallback(() => {
     if (debounceTimerRef.current) {
@@ -283,6 +297,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       return;
     }
 
+    persistentUserIdRef.current = getPersistentUserId();
     setIsListLoading(true);
     setError(null);
 
@@ -292,11 +307,14 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
     socketRef.current = socket;
 
     const identificationPayload = {
+      persistentUserId: persistentUserIdRef.current,
       isDisplay,
       suppressPresence: true,
       allowBattlemapMutations: isDisplay,
     };
-    socket.emit("user-identify", identificationPayload);
+    socket.on("connect", () => {
+      socket.emit("user-identify", identificationPayload);
+    });
 
     const handleList = (list: BattlemapSummary[]) => {
       debugLog("battlemap:list", list.map((item) => ({ id: item.id, name: item.name })));
