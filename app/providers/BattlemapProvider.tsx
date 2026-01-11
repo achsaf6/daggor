@@ -30,6 +30,12 @@ interface BattlemapSummary {
   mapPath: string | null;
 }
 
+interface BattlemapImageSummary {
+  id: string;
+  name: string;
+  mapPath: string | null;
+}
+
 interface BattlemapSettings {
   gridScale: number;
   gridOffsetX: number;
@@ -40,6 +46,8 @@ interface BattlemapData extends BattlemapSettings {
   id: string;
   name: string;
   mapPath: string | null;
+  images: BattlemapImageSummary[];
+  activeImageId: string | null;
   gridData: GridData;
   covers: Cover[];
 }
@@ -61,7 +69,11 @@ interface BattlemapContextValue {
   selectBattlemap: (battlemapId: string) => void;
   refreshBattlemap: () => Promise<void>;
   renameBattlemap: (name: string) => Promise<void>;
-  updateBattlemapMapPath: (mapPath: string) => Promise<void>;
+  updateBattlemapMapPath: (mapPath: string, battlemapImageId?: string | null) => Promise<void>;
+  setActiveBattlemapImage: (imageId: string) => Promise<void>;
+  createBattlemapImage: (name?: string) => Promise<string | null>;
+  renameBattlemapImage: (imageId: string, name: string) => Promise<void>;
+  deleteBattlemapImage: (imageId: string) => Promise<void>;
   updateBattlemapSettings: (updates: Partial<BattlemapSettings>) => void;
   createBattlemap: (input: CreateBattlemapInput) => Promise<BattlemapSummary | null>;
   syncBattlemapFromServer: (battlemapId: string | null) => void;
@@ -77,6 +89,8 @@ interface BattlemapPayload {
   id: string;
   name?: string | null;
   mapPath?: string | null;
+  images?: BattlemapImageSummary[] | null;
+  activeImageId?: string | null;
   gridScale?: number | null;
   gridOffsetX?: number | null;
   gridOffsetY?: number | null;
@@ -166,10 +180,27 @@ const normalizeBattlemapPayload = (payload: BattlemapPayload): BattlemapData => 
     ? payload.covers.map(parseCover).filter((cover): cover is Cover => cover !== null)
     : [];
 
+  const images: BattlemapImageSummary[] = Array.isArray(payload.images)
+    ? payload.images
+        .filter((img): img is BattlemapImageSummary => Boolean(img && typeof img.id === "string"))
+        .map((img) => ({
+          id: img.id,
+          name: typeof img.name === "string" && img.name.trim() ? img.name.trim() : "Floor",
+          mapPath: img.mapPath ?? null,
+        }))
+    : [];
+
+  const activeImageId =
+    typeof payload.activeImageId === "string" && payload.activeImageId.trim() !== ""
+      ? payload.activeImageId
+      : null;
+
   return {
     id: payload.id,
     name: payload.name?.trim() || "Untitled Battlemap",
     mapPath: payload.mapPath ?? null,
+    images,
+    activeImageId,
     gridScale:
       typeof payload.gridScale === "number" && Number.isFinite(payload.gridScale)
         ? payload.gridScale
@@ -459,7 +490,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
   );
 
   const updateBattlemapMapPath = useCallback(
-    async (mapPath: string) => {
+    async (mapPath: string, battlemapImageId?: string | null) => {
       if (!currentBattlemapId) {
         return;
       }
@@ -471,12 +502,132 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         const sanitizedMapPath = mapPath.trim();
         await emitWithAck("battlemap:update-map-path", {
           battlemapId: currentBattlemapId,
+          battlemapImageId: battlemapImageId ?? currentBattlemap?.activeImageId ?? null,
           mapPath: sanitizedMapPath || null,
         });
         await requestBattlemap(currentBattlemapId);
       } catch (updateError) {
         console.error("Failed to update map path", updateError);
         setError("Failed to update map path");
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [currentBattlemap?.activeImageId, currentBattlemapId, emitWithAck, requestBattlemap]
+  );
+
+  const setActiveBattlemapImage = useCallback(
+    async (imageId: string) => {
+      if (!currentBattlemapId) {
+        return;
+      }
+      const trimmed = imageId.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      debugLog("setActiveBattlemapImage", currentBattlemapId, trimmed);
+      setIsMutating(true);
+      setError(null);
+      try {
+        await emitWithAck("battlemap:set-active-image", {
+          battlemapId: currentBattlemapId,
+          imageId: trimmed,
+        });
+      } catch (activeImageError) {
+        console.error("Failed to set active floor", activeImageError);
+        setError("Failed to change floor");
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [currentBattlemapId, emitWithAck]
+  );
+
+  const createBattlemapImage = useCallback(
+    async (name?: string) => {
+      if (!currentBattlemapId) {
+        return null;
+      }
+
+      debugLog("createBattlemapImage", currentBattlemapId, name);
+      setIsMutating(true);
+      setError(null);
+      try {
+        const response = await emitWithAck("battlemap:add-image", {
+          battlemapId: currentBattlemapId,
+          name: typeof name === "string" ? name : undefined,
+        });
+        const imageId =
+          typeof response === "object" && response !== null && "imageId" in response
+            ? (response as { imageId?: unknown }).imageId
+            : null;
+        const normalizedId = typeof imageId === "string" ? imageId : null;
+        await requestBattlemap(currentBattlemapId);
+        return normalizedId;
+      } catch (createImageError) {
+        console.error("Failed to add floor", createImageError);
+        setError("Failed to add floor");
+        return null;
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [currentBattlemapId, emitWithAck, requestBattlemap]
+  );
+
+  const renameBattlemapImage = useCallback(
+    async (imageId: string, name: string) => {
+      if (!currentBattlemapId) {
+        return;
+      }
+      const trimmedId = imageId.trim();
+      const trimmedName = name.trim();
+      if (!trimmedId || !trimmedName) {
+        return;
+      }
+
+      debugLog("renameBattlemapImage", currentBattlemapId, trimmedId, trimmedName);
+      setIsMutating(true);
+      setError(null);
+      try {
+        await emitWithAck("battlemap:rename-image", {
+          battlemapId: currentBattlemapId,
+          imageId: trimmedId,
+          name: trimmedName,
+        });
+      } catch (renameImageError) {
+        console.error("Failed to rename floor", renameImageError);
+        setError("Failed to rename floor");
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [currentBattlemapId, emitWithAck]
+  );
+
+  const deleteBattlemapImage = useCallback(
+    async (imageId: string) => {
+      if (!currentBattlemapId) {
+        return;
+      }
+      const trimmedId = imageId.trim();
+      if (!trimmedId) {
+        return;
+      }
+
+      debugLog("deleteBattlemapImage", currentBattlemapId, trimmedId);
+      setIsMutating(true);
+      setError(null);
+      try {
+        await emitWithAck("battlemap:delete-image", {
+          battlemapId: currentBattlemapId,
+          imageId: trimmedId,
+        });
+        await requestBattlemap(currentBattlemapId);
+      } catch (deleteImageError) {
+        console.error("Failed to delete floor", deleteImageError);
+        setError("Failed to delete floor");
       } finally {
         setIsMutating(false);
       }
@@ -627,6 +778,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       try {
         await emitWithAck("battlemap:add-cover", {
           battlemapId: currentBattlemapId,
+          battlemapImageId: currentBattlemap.activeImageId ?? null,
           cover: sanitized,
         });
         return sanitized;
@@ -665,6 +817,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       try {
         await emitWithAck("battlemap:update-cover", {
           battlemapId: currentBattlemapId,
+          battlemapImageId: currentBattlemap?.activeImageId ?? null,
           coverId: id,
           updates,
         });
@@ -674,7 +827,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         await refreshBattlemap();
       }
     },
-    [currentBattlemapId, emitWithAck, refreshBattlemap]
+    [currentBattlemap?.activeImageId, currentBattlemapId, emitWithAck, refreshBattlemap]
   );
 
   const removeCover = useCallback(
@@ -696,6 +849,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       try {
         await emitWithAck("battlemap:remove-cover", {
           battlemapId: currentBattlemapId,
+          battlemapImageId: currentBattlemap?.activeImageId ?? null,
           coverId: id,
         });
       } catch (deleteError) {
@@ -704,7 +858,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         await refreshBattlemap();
       }
     },
-    [currentBattlemapId, emitWithAck, refreshBattlemap]
+    [currentBattlemap?.activeImageId, currentBattlemapId, emitWithAck, refreshBattlemap]
   );
 
   const value = useMemo<BattlemapContextValue>(
@@ -721,6 +875,10 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       refreshBattlemap,
       renameBattlemap,
       updateBattlemapMapPath,
+      setActiveBattlemapImage,
+      createBattlemapImage,
+      renameBattlemapImage,
+      deleteBattlemapImage,
       updateBattlemapSettings,
       createBattlemap,
       syncBattlemapFromServer,
@@ -744,6 +902,10 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       refreshBattlemap,
       renameBattlemap,
       updateBattlemapMapPath,
+      setActiveBattlemapImage,
+      createBattlemapImage,
+      renameBattlemapImage,
+      deleteBattlemapImage,
       updateBattlemapSettings,
       createBattlemap,
       syncBattlemapFromServer,

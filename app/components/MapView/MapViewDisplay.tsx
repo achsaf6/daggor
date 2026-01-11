@@ -45,6 +45,8 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
     addCover,
     updateCover,
     removeCover,
+    setActiveBattlemapImage,
+    canManageBattlemaps,
   } = useBattlemap();
 
   const isReady =
@@ -65,6 +67,31 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
   const gridOffsetY = currentBattlemap?.gridOffsetY ?? 0;
 
   const effectiveGridData = currentBattlemap?.gridData ?? DEFAULT_GRID_DATA;
+
+  const images = useMemo(() => currentBattlemap?.images ?? [], [currentBattlemap?.images]);
+  const activeImageId = currentBattlemap?.activeImageId ?? null;
+  const activeImageIndex = useMemo(() => {
+    if (!activeImageId) {
+      return images.length > 0 ? 0 : -1;
+    }
+    return images.findIndex((img) => img.id === activeImageId);
+  }, [activeImageId, images]);
+
+  const handlePrevFloor = useCallback(() => {
+    if (!canManageBattlemaps || images.length < 2) return;
+    const currentIndex = activeImageIndex >= 0 ? activeImageIndex : 0;
+    if (currentIndex > 0) {
+      void setActiveBattlemapImage(images[currentIndex - 1].id);
+    }
+  }, [activeImageIndex, canManageBattlemaps, images, setActiveBattlemapImage]);
+
+  const handleNextFloor = useCallback(() => {
+    if (!canManageBattlemaps || images.length < 2) return;
+    const currentIndex = activeImageIndex >= 0 ? activeImageIndex : 0;
+    if (currentIndex < images.length - 1) {
+      void setActiveBattlemapImage(images[currentIndex + 1].id);
+    }
+  }, [activeImageIndex, canManageBattlemaps, images, setActiveBattlemapImage]);
 
   const handleGridScaleChange = useCallback(
     (value: number) => {
@@ -350,6 +377,16 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
         isSquareToolActive={isSquareToolActive}
         isSquareToolLocked={isSquareToolLocked}
         gridData={effectiveGridData}
+        floorCount={images.length}
+        floorIndex={activeImageIndex >= 0 ? activeImageIndex : 0}
+        floorLabel={
+          images.length > 0
+            ? images[activeImageIndex >= 0 ? activeImageIndex : 0]?.name ?? "Floor"
+            : null
+        }
+        onPrevFloor={handlePrevFloor}
+        onNextFloor={handleNextFloor}
+        floorControlsDisabled={!canManageBattlemaps || isBattlemapLoading}
       />
       <MapImage onLoad={updateBounds} src={currentBattlemap?.mapPath ?? undefined} />
       <CoverManager

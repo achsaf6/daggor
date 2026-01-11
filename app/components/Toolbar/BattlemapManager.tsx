@@ -77,12 +77,17 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
     selectBattlemap,
     renameBattlemap,
     updateBattlemapMapPath,
+    setActiveBattlemapImage,
+    createBattlemapImage,
+    renameBattlemapImage,
+    deleteBattlemapImage,
     createBattlemap,
     reorderBattlemaps,
     canManageBattlemaps,
   } = useBattlemap();
 
   const [nameValue, setNameValue] = useState<string>(currentBattlemap?.name ?? "");
+  const [floorNameValue, setFloorNameValue] = useState<string>("");
   const [newBattlemapName, setNewBattlemapName] = useState<string>("");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -91,6 +96,21 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
   useEffect(() => {
     setNameValue(currentBattlemap?.name ?? "");
   }, [currentBattlemap?.id, currentBattlemap?.name]);
+
+  const floors = useMemo(() => currentBattlemap?.images ?? [], [currentBattlemap?.images]);
+  const activeFloorId = useMemo(() => {
+    if (!currentBattlemap) return null;
+    return currentBattlemap.activeImageId ?? floors[0]?.id ?? null;
+  }, [currentBattlemap, floors]);
+
+  useEffect(() => {
+    if (!currentBattlemap || floors.length === 0 || !activeFloorId) {
+      setFloorNameValue("");
+      return;
+    }
+    const active = floors.find((floor) => floor.id === activeFloorId) ?? floors[0];
+    setFloorNameValue(active?.name ?? "");
+  }, [activeFloorId, currentBattlemap, floors]);
 
   useEffect(() => {
     if (!isMutating && !isBattlemapLoading) {
@@ -127,6 +147,12 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
       return;
     }
 
+    if (!activeFloorId) {
+      setStatusMessage("Create a floor before uploading an image.");
+      event.target.value = "";
+      return;
+    }
+
     try {
       setIsUploading(true);
       setStatusMessage("Uploading map image…");
@@ -146,7 +172,7 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
       }
 
       const nextPath: string = payload.publicUrl ?? payload.path;
-      await updateBattlemapMapPath(nextPath);
+      await updateBattlemapMapPath(nextPath, activeFloorId);
       setStatusMessage("Map image uploaded.");
     } catch (uploadError) {
       console.error(uploadError);
@@ -157,6 +183,53 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
       event.target.value = "";
       setIsUploading(false);
     }
+  };
+
+  const handleFloorSelect = async (floorId: string) => {
+    if (!floorId || !canManageBattlemaps) {
+      return;
+    }
+    setStatusMessage("Switching floor…");
+    await setActiveBattlemapImage(floorId);
+  };
+
+  const handleFloorNameSave = async () => {
+    if (!currentBattlemap || !activeFloorId) {
+      return;
+    }
+
+    const trimmed = floorNameValue.trim();
+    const existing = floors.find((floor) => floor.id === activeFloorId);
+    if (!trimmed || trimmed === (existing?.name ?? "").trim()) {
+      return;
+    }
+
+    setStatusMessage("Saving floor name…");
+    await renameBattlemapImage(activeFloorId, trimmed);
+  };
+
+  const handleAddFloor = async () => {
+    if (!currentBattlemap || !canManageBattlemaps) {
+      return;
+    }
+    setStatusMessage("Adding floor…");
+    await createBattlemapImage(`Floor ${floors.length + 1}`);
+  };
+
+  const handleDeleteFloor = async () => {
+    if (!currentBattlemap || !activeFloorId || !canManageBattlemaps) {
+      return;
+    }
+    if (floors.length <= 1) {
+      return;
+    }
+    const active = floors.find((floor) => floor.id === activeFloorId);
+    const confirmed = window.confirm(`Delete floor "${active?.name ?? "Floor"}" and all of its covers?`);
+    if (!confirmed) {
+      return;
+    }
+    setStatusMessage("Deleting floor…");
+    await deleteBattlemapImage(activeFloorId);
   };
 
   const handleCreateBattlemap = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -310,6 +383,76 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
       </div>
 
       <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="block text-xs uppercase tracking-wide text-white/60">Floors</label>
+          <button
+            type="button"
+            onClick={handleAddFloor}
+            disabled={!currentBattlemap || disabled || !canManageBattlemaps}
+            className="text-xs rounded-md border border-white/15 bg-white/5 px-2 py-1 text-white/80 hover:bg-white/10 disabled:opacity-50"
+          >
+            + Add Floor
+          </button>
+        </div>
+
+        {!currentBattlemap ? (
+          <div className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white/60">
+            Select a battlemap to manage floors.
+          </div>
+        ) : floors.length === 0 ? (
+          <div className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white/60">
+            No floors yet.
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2">
+              {floors.map((floor) => (
+                <button
+                  key={floor.id}
+                  type="button"
+                  onClick={() => handleFloorSelect(floor.id)}
+                  disabled={disabled || !canManageBattlemaps}
+                  className={`rounded-md border px-2 py-1 text-xs transition ${
+                    floor.id === activeFloorId
+                      ? "border-emerald-400 bg-emerald-500/15 text-emerald-100"
+                      : "border-white/15 bg-white/5 text-white/80 hover:bg-white/10"
+                  } disabled:opacity-50`}
+                  title={floor.name}
+                >
+                  {floor.name || "Floor"}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={floorNameValue}
+                onChange={(event) => setFloorNameValue(event.target.value)}
+                onBlur={handleFloorNameSave}
+                disabled={!activeFloorId || disabled || !canManageBattlemaps}
+                className="flex-1 bg-black/40 border border-white/20 rounded-md px-2 py-2 text-white focus:outline-none focus:ring-1 focus:ring-white/40 disabled:opacity-50"
+                placeholder="Floor name"
+              />
+              <button
+                type="button"
+                onClick={handleDeleteFloor}
+                disabled={!activeFloorId || floors.length <= 1 || disabled || !canManageBattlemaps}
+                className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-2 text-xs text-red-100 hover:bg-red-500/20 disabled:opacity-50"
+                title={floors.length <= 1 ? "Cannot delete the last floor" : "Delete floor"}
+              >
+                Delete
+              </button>
+            </div>
+
+            {!canManageBattlemaps ? (
+              <p className="text-xs text-white/40">Only the display host can change floors.</p>
+            ) : null}
+          </>
+        )}
+      </div>
+
+      <div className="space-y-2">
         <label className="block text-xs uppercase tracking-wide text-white/60">
           Map Image
         </label>
@@ -323,12 +466,12 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
             ref={fileInputRef}
             className="hidden"
             onChange={handleFileSelected}
-            disabled={!currentBattlemap || disabled || isUploading}
+            disabled={!currentBattlemap || !activeFloorId || disabled || isUploading}
           />
           <button
             type="button"
             onClick={handleUploadClick}
-            disabled={!currentBattlemap || disabled || isUploading}
+            disabled={!currentBattlemap || !activeFloorId || disabled || isUploading}
             className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-md px-2 py-2 text-white text-sm font-medium transition disabled:opacity-50"
           >
             {isUploading ? "Uploading…" : currentBattlemap?.mapPath ? "Replace Image" : "Upload Image"}

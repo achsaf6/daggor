@@ -37,6 +37,11 @@ const battlemapState = {
   activeBattlemapId: null,
 };
 
+// Schema capability flags (set during initial load; also used for best-effort fallbacks)
+let supportsBattlemapImages = false;
+let supportsBattlemapActiveImageId = true; // optimistic; will be disabled if column missing
+let supportsBattlemapCoverImageId = false;
+
 const persistBattlemapOrder = (orderedIds) => {
   if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
     return Promise.resolve();
@@ -120,15 +125,37 @@ const serializeBattlemapSummary = (battlemap) => ({
   mapPath: battlemap.mapPath,
 });
 
+const getBattlemapCoversForActiveImage = (battlemap) => {
+  const coversMap = battlemap?.covers instanceof Map ? battlemap.covers : new Map();
+
+  // Migrated schema: we store covers with a private _imageId marker and only expose the active image covers.
+  if (supportsBattlemapCoverImageId && battlemap?.activeImageId) {
+    const result = [];
+    for (const value of coversMap.values()) {
+      if (value && (value._imageId === battlemap.activeImageId || !value._imageId)) {
+        // Strip internal marker before sending to clients
+        const { _imageId, ...rest } = value;
+        result.push(rest);
+      }
+    }
+    return result;
+  }
+
+  // Legacy schema: covers are battlemap-wide
+  return Array.from(coversMap.values());
+};
+
 const serializeBattlemap = (battlemap) => ({
   id: battlemap.id,
   name: battlemap.name,
   mapPath: battlemap.mapPath,
+  images: Array.isArray(battlemap.images) ? battlemap.images : [],
+  activeImageId: battlemap.activeImageId ?? null,
   gridScale: battlemap.gridScale,
   gridOffsetX: battlemap.gridOffsetX,
   gridOffsetY: battlemap.gridOffsetY,
   gridData: battlemap.gridData,
-  covers: Array.from(battlemap.covers.values()),
+  covers: getBattlemapCoversForActiveImage(battlemap),
 });
 
 const logEvent = (...args) => {
@@ -144,6 +171,7 @@ const loadBattlemapStateFromSupabase = async () => {
         id,
         name,
         map_path,
+        active_image_id,
         grid_scale,
         grid_offset_x,
         grid_offset_y,
@@ -155,7 +183,33 @@ const loadBattlemapStateFromSupabase = async () => {
     .order('created_at', { ascending: true });
 
   if (error) {
-    throw error;
+    // Older schemas might not have active_image_id; retry without it.
+    const message = typeof error?.message === 'string' ? error.message : '';
+    if (message.includes('active_image_id')) {
+      supportsBattlemapActiveImageId = false;
+      const retry = await supabase
+        .from('battlemaps')
+        .select(
+          `
+            id,
+            name,
+            map_path,
+            grid_scale,
+            grid_offset_x,
+            grid_offset_y,
+            grid_data,
+            sort_index
+          `
+        )
+        .order('sort_index', { ascending: true })
+        .order('created_at', { ascending: true });
+      if (retry.error) {
+        throw retry.error;
+      }
+      battlemapRows = retry.data;
+    } else {
+      throw error;
+    }
   }
 
   if (!battlemapRows || battlemapRows.length === 0) {
@@ -190,12 +244,48 @@ const loadBattlemapStateFromSupabase = async () => {
     battlemapRows = created ? [created] : [];
   }
 
-  const { data: coverRows, error: coverError } = await supabase
-    .from('battlemap_covers')
-    .select('id, battlemap_id, x, y, width, height, color');
+  // Attempt to load floors/images (battlemap_images). If table doesn't exist yet, we fall back to legacy single-image mode.
+  let imageRows = null;
+  supportsBattlemapImages = true;
+  const imagesResult = await supabase
+    .from('battlemap_images')
+    .select('id, battlemap_id, name, map_path, sort_index, created_at')
+    .order('battlemap_id', { ascending: true })
+    .order('sort_index', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (imagesResult.error) {
+    const message = typeof imagesResult.error?.message === 'string' ? imagesResult.error.message : '';
+    supportsBattlemapImages = false;
+    if (!message.includes('battlemap_images')) {
+      // Unexpected error (not "relation does not exist") → surface it.
+      throw imagesResult.error;
+    }
+  } else {
+    imageRows = imagesResult.data ?? [];
+  }
 
-  if (coverError) {
-    throw coverError;
+  // Attempt to load covers with floor scope. If the new column doesn't exist yet, fall back to legacy covers-per-battlemap.
+  let coverRows = null;
+  supportsBattlemapCoverImageId = true;
+  const coversResult = await supabase
+    .from('battlemap_covers')
+    .select('id, battlemap_id, battlemap_image_id, x, y, width, height, color');
+  if (coversResult.error) {
+    const message = typeof coversResult.error?.message === 'string' ? coversResult.error.message : '';
+    if (message.includes('battlemap_image_id')) {
+      supportsBattlemapCoverImageId = false;
+      const legacyCovers = await supabase
+        .from('battlemap_covers')
+        .select('id, battlemap_id, x, y, width, height, color');
+      if (legacyCovers.error) {
+        throw legacyCovers.error;
+      }
+      coverRows = legacyCovers.data ?? [];
+    } else {
+      throw coversResult.error;
+    }
+  } else {
+    coverRows = coversResult.data ?? [];
   }
 
   battlemapState.order = [];
@@ -207,6 +297,8 @@ const loadBattlemapStateFromSupabase = async () => {
       id: row.id,
       name: row.name ?? DEFAULT_BATTLEMAP_NAME,
       mapPath: row.map_path ?? null,
+      images: [],
+      activeImageId: supportsBattlemapActiveImageId ? row.active_image_id ?? null : null,
       gridScale: typeof row.grid_scale === 'number' ? row.grid_scale : DEFAULT_SETTINGS.gridScale,
       gridOffsetX:
         typeof row.grid_offset_x === 'number' ? row.grid_offset_x : DEFAULT_SETTINGS.gridOffsetX,
@@ -217,11 +309,62 @@ const loadBattlemapStateFromSupabase = async () => {
     });
   }
 
+  // Attach images (floors)
+  if (supportsBattlemapImages && Array.isArray(imageRows)) {
+    const byBattlemap = new Map();
+    for (const image of imageRows) {
+      if (!image?.battlemap_id) continue;
+      const list = byBattlemap.get(image.battlemap_id) ?? [];
+      list.push({
+        id: image.id,
+        name: image.name ?? 'Floor',
+        mapPath: image.map_path ?? null,
+        sortIndex: typeof image.sort_index === 'number' ? image.sort_index : 0,
+      });
+      byBattlemap.set(image.battlemap_id, list);
+    }
+
+    for (const [battlemapId, list] of byBattlemap.entries()) {
+      const battlemap = battlemapState.maps.get(battlemapId);
+      if (!battlemap) continue;
+      battlemap.images = list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
+      if (!battlemap.activeImageId) {
+        battlemap.activeImageId = battlemap.images[0]?.id ?? null;
+      }
+      // Keep legacy mapPath pointing at the active image for UI compatibility
+      const activeImage = battlemap.images.find((img) => img.id === battlemap.activeImageId) ?? battlemap.images[0];
+      battlemap.mapPath = activeImage?.mapPath ?? battlemap.mapPath ?? null;
+    }
+  } else {
+    // Legacy: represent the single map_path as a single implicit image (no persisted id)
+    for (const id of battlemapState.order) {
+      const battlemap = battlemapState.maps.get(id);
+      if (!battlemap) continue;
+      battlemap.images = [];
+      battlemap.activeImageId = null;
+    }
+  }
+
+  // Attach covers (scoped to an image when available)
   for (const cover of coverRows || []) {
     const parent = battlemapState.maps.get(cover.battlemap_id);
-    if (!parent) {
+    if (!parent) continue;
+
+    // If cover has an image id, but the parent has no images loaded (shouldn't happen in migrated schema),
+    // fall back to battlemap-level covers.
+    if (supportsBattlemapCoverImageId && cover.battlemap_image_id) {
+      if (!parent.images || parent.images.length === 0) {
+        parent.covers.set(cover.id, sanitizeCover({ ...cover, id: cover.id }));
+        continue;
+      }
+
+      // Only store covers for active image in-memory? We keep all covers but filter on serialize.
+      // Store as a composite key in-memory to avoid collisions across floors.
+      const compositeId = `${cover.battlemap_image_id}:${cover.id}`;
+      parent.covers.set(compositeId, { ...sanitizeCover({ ...cover, id: cover.id }), _imageId: cover.battlemap_image_id });
       continue;
     }
+
     parent.covers.set(cover.id, sanitizeCover({ ...cover, id: cover.id }));
   }
 
@@ -322,7 +465,8 @@ app.prepare().then(async () => {
   };
 
   const insertBattlemapRow = (battlemap, sortIndex = 0) =>
-    supabase.from('battlemaps').insert({
+    supabase.from('battlemaps').insert((() => {
+      const row = {
       id: battlemap.id,
       name: battlemap.name,
       map_path: battlemap.mapPath,
@@ -331,7 +475,12 @@ app.prepare().then(async () => {
       grid_offset_y: battlemap.gridOffsetY,
       grid_data: battlemap.gridData,
       sort_index: sortIndex,
-    });
+      };
+      if (supportsBattlemapActiveImageId) {
+        row.active_image_id = battlemap.activeImageId ?? null;
+      }
+      return row;
+    })());
 
   const updateBattlemapRow = (battlemapId) => {
     const battlemap = battlemapState.maps.get(battlemapId);
@@ -341,7 +490,8 @@ app.prepare().then(async () => {
 
     return supabase
       .from('battlemaps')
-      .update({
+      .update((() => {
+        const row = {
         name: battlemap.name,
         map_path: battlemap.mapPath,
         grid_scale: battlemap.gridScale,
@@ -349,7 +499,12 @@ app.prepare().then(async () => {
         grid_offset_y: battlemap.gridOffsetY,
         grid_data: battlemap.gridData,
         updated_at: new Date().toISOString(),
-      })
+        };
+        if (supportsBattlemapActiveImageId) {
+          row.active_image_id = battlemap.activeImageId ?? null;
+        }
+        return row;
+      })())
       .eq('id', battlemapId);
   };
 
@@ -359,8 +514,9 @@ app.prepare().then(async () => {
   const deleteCoversForBattlemap = (battlemapId) =>
     supabase.from('battlemap_covers').delete().eq('battlemap_id', battlemapId);
 
-  const upsertCoverRow = (battlemapId, cover) =>
-    supabase.from('battlemap_covers').upsert({
+  const upsertCoverRow = (battlemapId, cover, battlemapImageId = null) =>
+    supabase.from('battlemap_covers').upsert((() => {
+      const row = {
       id: cover.id,
       battlemap_id: battlemapId,
       x: cover.x,
@@ -368,9 +524,92 @@ app.prepare().then(async () => {
       width: cover.width,
       height: cover.height,
       color: cover.color,
-    });
+      };
+      if (supportsBattlemapCoverImageId) {
+        row.battlemap_image_id = battlemapImageId;
+      }
+      return row;
+    })());
 
   const deleteCoverRow = (coverId) => supabase.from('battlemap_covers').delete().eq('id', coverId);
+
+  const insertBattlemapImageRow = (image) =>
+    supabase.from('battlemap_images').insert({
+      id: image.id,
+      battlemap_id: image.battlemapId,
+      name: image.name,
+      map_path: image.mapPath,
+      sort_index: image.sortIndex ?? 0,
+    });
+
+  const updateBattlemapImageRow = (imageId, updates) =>
+    supabase.from('battlemap_images').update(updates).eq('id', imageId);
+
+  const deleteBattlemapImageRow = (imageId) =>
+    supabase.from('battlemap_images').delete().eq('id', imageId);
+
+  const getBattlemapImageById = (battlemap, imageId) => {
+    if (!battlemap || !Array.isArray(battlemap.images)) return null;
+    return battlemap.images.find((img) => img.id === imageId) ?? null;
+  };
+
+  const ensureBattlemapHasAtLeastOneImage = (battlemap) => {
+    if (!supportsBattlemapImages || !battlemap) return;
+    if (Array.isArray(battlemap.images) && battlemap.images.length > 0) {
+      if (!battlemap.activeImageId) {
+        battlemap.activeImageId = battlemap.images[0]?.id ?? null;
+      }
+      const active = getBattlemapImageById(battlemap, battlemap.activeImageId) ?? battlemap.images[0];
+      battlemap.mapPath = active?.mapPath ?? battlemap.mapPath ?? null;
+      return;
+    }
+
+    // Best-effort backfill in memory (and persist in background) if the table exists but has no rows.
+    const imageId = randomUUID();
+    const image = {
+      id: imageId,
+      battlemapId: battlemap.id,
+      name: 'Floor 1',
+      mapPath: battlemap.mapPath ?? null,
+      sortIndex: 0,
+    };
+    battlemap.images = [image];
+    battlemap.activeImageId = imageId;
+    runBackgroundTask('backfill battlemap image', async () => {
+      await insertBattlemapImageRow(image);
+      if (supportsBattlemapActiveImageId) {
+        await updateBattlemapRow(battlemap.id);
+      }
+    });
+  };
+
+  const findCoverEntry = (battlemap, coverId, imageId = null) => {
+    const coversMap = battlemap?.covers instanceof Map ? battlemap.covers : null;
+    if (!coversMap || !coverId) {
+      return null;
+    }
+
+    if (supportsBattlemapCoverImageId) {
+      const effectiveImageId = imageId ?? battlemap?.activeImageId ?? null;
+      if (effectiveImageId) {
+        const key = `${effectiveImageId}:${coverId}`;
+        const existing = coversMap.get(key);
+        if (existing) {
+          return { key, existing, imageId: effectiveImageId };
+        }
+        // Fallback scan
+        for (const [k, value] of coversMap.entries()) {
+          if (value?.id === coverId && value?._imageId === effectiveImageId) {
+            return { key: k, existing: value, imageId: effectiveImageId };
+          }
+        }
+      }
+      return null;
+    }
+
+    const existing = coversMap.get(coverId);
+    return existing ? { key: coverId, existing, imageId: null } : null;
+  };
 
   // Store display mode users separately (they're not in the users Map)
   const displayModeUsers = new Map(); // socketId -> userData
@@ -420,13 +659,13 @@ app.prepare().then(async () => {
         .map((id) => battlemapState.maps.get(id))
         .filter(Boolean)
         .map((battlemap) => serializeBattlemapSummary(battlemap));
-      logEvent('Sending battlemap list to socket', userId, summaries.map((item) => item.id));
+      // logEvent('Sending battlemap list to socket', userId, summaries.map((item) => item.id));
       socket.emit('battlemap:list', summaries);
     };
 
     const sendActiveBattlemap = () => {
       ensureActiveBattlemap();
-       logEvent('Sending active battlemap to socket', userId, battlemapState.activeBattlemapId ?? 'none');
+      //  logEvent('Sending active battlemap to socket', userId, battlemapState.activeBattlemapId ?? 'none');
       socket.emit('battlemap:active', { battlemapId: battlemapState.activeBattlemapId });
     };
 
@@ -563,7 +802,7 @@ app.prepare().then(async () => {
 
     // Listen for user identification
     socket.once('user-identify', (data) => {
-      logEvent('Socket identified', socket.id, JSON.stringify(data));
+      // logEvent('Socket identified', socket.id, JSON.stringify(data));
       initializeUser(data);
     });
 
@@ -580,6 +819,7 @@ app.prepare().then(async () => {
       if (!battlemap) {
         return;
       }
+      ensureBattlemapHasAtLeastOneImage(battlemap);
       logEvent('Client requested battlemap', battlemapId);
       respond(ack, { ok: true, battlemap: serializeBattlemap(battlemap) });
     });
@@ -598,11 +838,24 @@ app.prepare().then(async () => {
           ? payload.mapPath.trim()
           : null;
       const battlemapId = randomUUID();
+      const initialImageId = supportsBattlemapImages ? randomUUID() : null;
 
       const newBattlemap = {
         id: battlemapId,
         name: trimmedName,
         mapPath: sanitizedPath,
+        images: supportsBattlemapImages
+          ? [
+              {
+                id: initialImageId,
+                battlemapId,
+                name: 'Floor 1',
+                mapPath: sanitizedPath,
+                sortIndex: 0,
+              },
+            ]
+          : [],
+        activeImageId: supportsBattlemapImages ? initialImageId : null,
         gridScale: DEFAULT_SETTINGS.gridScale,
         gridOffsetX: DEFAULT_SETTINGS.gridOffsetX,
         gridOffsetY: DEFAULT_SETTINGS.gridOffsetY,
@@ -623,7 +876,207 @@ app.prepare().then(async () => {
       }
       emitBattlemapUpdate(battlemapId);
 
-      runBackgroundTask('insert battlemap', () => insertBattlemapRow(newBattlemap, newSortIndex));
+      runBackgroundTask('insert battlemap', async () => {
+        await insertBattlemapRow(newBattlemap, newSortIndex);
+        if (supportsBattlemapImages && initialImageId) {
+          await insertBattlemapImageRow({
+            id: initialImageId,
+            battlemapId,
+            name: 'Floor 1',
+            mapPath: sanitizedPath,
+            sortIndex: 0,
+          });
+        }
+      });
+    });
+
+    socket.on('battlemap:set-active-image', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:set-active-image', ack)) {
+        return;
+      }
+
+      if (!supportsBattlemapImages) {
+        respond(ack, { ok: false, error: 'unsupported' });
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const imageId = payload?.imageId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      ensureBattlemapHasAtLeastOneImage(battlemap);
+      if (typeof imageId !== 'string' || imageId.trim() === '') {
+        respond(ack, { ok: false, error: 'invalid-image-id' });
+        return;
+      }
+
+      const image = getBattlemapImageById(battlemap, imageId);
+      if (!image) {
+        respond(ack, { ok: false, error: 'image-not-found' });
+        return;
+      }
+
+      battlemap.activeImageId = imageId;
+      battlemap.mapPath = image.mapPath ?? null;
+
+      logEvent('Active battlemap image set to', imageId, 'for', battlemap.id);
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('persist active battlemap image', () => updateBattlemapRow(battlemap.id));
+    });
+
+    socket.on('battlemap:add-image', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:add-image', ack)) {
+        return;
+      }
+
+      if (!supportsBattlemapImages) {
+        respond(ack, { ok: false, error: 'unsupported' });
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      ensureBattlemapHasAtLeastOneImage(battlemap);
+
+      const trimmedName =
+        typeof payload?.name === 'string' && payload.name.trim() !== ''
+          ? payload.name.trim()
+          : `Floor ${Array.isArray(battlemap.images) ? battlemap.images.length + 1 : 1}`;
+
+      const imageId = randomUUID();
+      const nextSortIndex = Array.isArray(battlemap.images) ? battlemap.images.length : 0;
+      const image = {
+        id: imageId,
+        battlemapId: battlemap.id,
+        name: trimmedName,
+        mapPath: null,
+        sortIndex: nextSortIndex,
+      };
+
+      battlemap.images = Array.isArray(battlemap.images) ? [...battlemap.images, image] : [image];
+      battlemap.activeImageId = imageId;
+      battlemap.mapPath = null;
+
+      logEvent('Added battlemap image', imageId, 'to', battlemap.id);
+      respond(ack, { ok: true, imageId });
+      emitBattlemapUpdate(battlemap.id);
+
+      runBackgroundTask('insert battlemap image', async () => {
+        await insertBattlemapImageRow(image);
+        await updateBattlemapRow(battlemap.id);
+      });
+    });
+
+    socket.on('battlemap:rename-image', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:rename-image', ack)) {
+        return;
+      }
+
+      if (!supportsBattlemapImages) {
+        respond(ack, { ok: false, error: 'unsupported' });
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const imageId = payload?.imageId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      ensureBattlemapHasAtLeastOneImage(battlemap);
+      if (typeof imageId !== 'string' || imageId.trim() === '') {
+        respond(ack, { ok: false, error: 'invalid-image-id' });
+        return;
+      }
+
+      const trimmedName =
+        typeof payload?.name === 'string' && payload.name.trim() !== ''
+          ? payload.name.trim()
+          : 'Floor';
+
+      const image = getBattlemapImageById(battlemap, imageId);
+      if (!image) {
+        respond(ack, { ok: false, error: 'image-not-found' });
+        return;
+      }
+
+      image.name = trimmedName;
+      logEvent('Renamed battlemap image', imageId, '→', `"${trimmedName}"`, 'for', battlemap.id);
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('rename battlemap image', () =>
+        updateBattlemapImageRow(imageId, { name: trimmedName, updated_at: new Date().toISOString() })
+      );
+    });
+
+    socket.on('battlemap:delete-image', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:delete-image', ack)) {
+        return;
+      }
+
+      if (!supportsBattlemapImages) {
+        respond(ack, { ok: false, error: 'unsupported' });
+        return;
+      }
+
+      const battlemapId = payload?.battlemapId;
+      const imageId = payload?.imageId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) {
+        return;
+      }
+
+      ensureBattlemapHasAtLeastOneImage(battlemap);
+      if (typeof imageId !== 'string' || imageId.trim() === '') {
+        respond(ack, { ok: false, error: 'invalid-image-id' });
+        return;
+      }
+
+      const existing = getBattlemapImageById(battlemap, imageId);
+      if (!existing) {
+        respond(ack, { ok: false, error: 'image-not-found' });
+        return;
+      }
+
+      const remaining = (battlemap.images ?? []).filter((img) => img.id !== imageId);
+      if (remaining.length === 0) {
+        respond(ack, { ok: false, error: 'cannot-delete-last-image' });
+        return;
+      }
+
+      battlemap.images = remaining;
+
+      // Remove any in-memory covers for this image
+      if (supportsBattlemapCoverImageId && battlemap.covers instanceof Map) {
+        for (const [key, value] of battlemap.covers.entries()) {
+          if (value?._imageId === imageId) {
+            battlemap.covers.delete(key);
+          }
+        }
+      }
+
+      if (battlemap.activeImageId === imageId) {
+        battlemap.activeImageId = remaining[0]?.id ?? null;
+        const nextActive = getBattlemapImageById(battlemap, battlemap.activeImageId) ?? remaining[0];
+        battlemap.mapPath = nextActive?.mapPath ?? null;
+      }
+
+      logEvent('Deleted battlemap image', imageId, 'from', battlemap.id);
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+      runBackgroundTask('delete battlemap image', async () => {
+        await deleteBattlemapImageRow(imageId);
+        await updateBattlemapRow(battlemap.id);
+      });
     });
 
     socket.on('battlemap:set-active', (payload, ack) => {
@@ -716,14 +1169,54 @@ app.prepare().then(async () => {
           ? payload.mapPath.trim()
           : null;
 
-      battlemap.mapPath = sanitizedPath;
-      battlemap.gridData = cloneGridData();
+      const targetImageId = payload?.battlemapImageId || payload?.imageId;
+
+      if (supportsBattlemapImages) {
+        ensureBattlemapHasAtLeastOneImage(battlemap);
+        const effectiveTargetId =
+          typeof targetImageId === 'string' && targetImageId.trim() !== ''
+            ? targetImageId
+            : battlemap.activeImageId ?? battlemap.images?.[0]?.id ?? null;
+        const image = effectiveTargetId ? getBattlemapImageById(battlemap, effectiveTargetId) : null;
+        if (!image) {
+          respond(ack, { ok: false, error: 'image-not-found' });
+          return;
+        }
+
+        image.mapPath = sanitizedPath;
+        if (battlemap.activeImageId === image.id) {
+          battlemap.mapPath = sanitizedPath;
+        }
+
+        // Preserve existing grid calibration for floor updates; only reset in legacy single-image updates.
+        const shouldResetGridData = !targetImageId && (battlemap.images?.length ?? 0) <= 1;
+        if (shouldResetGridData) {
+          battlemap.gridData = cloneGridData();
+        }
+      } else {
+        battlemap.mapPath = sanitizedPath;
+        battlemap.gridData = cloneGridData();
+      }
 
       logEvent('Updated map path for', battlemap.id, '→', sanitizedPath ?? '(none)');
       respond(ack, { ok: true });
       broadcastBattlemapList();
       emitBattlemapUpdate(battlemap.id);
-      runBackgroundTask('update battlemap map path', () => updateBattlemapRow(battlemap.id));
+      runBackgroundTask('update battlemap map path', async () => {
+        if (supportsBattlemapImages) {
+          const effectiveTargetId =
+            typeof (payload?.battlemapImageId || payload?.imageId) === 'string'
+              ? payload?.battlemapImageId || payload?.imageId
+              : battlemap.activeImageId;
+          if (effectiveTargetId) {
+            await updateBattlemapImageRow(effectiveTargetId, {
+              map_path: sanitizedPath,
+              updated_at: new Date().toISOString(),
+            });
+          }
+        }
+        await updateBattlemapRow(battlemap.id);
+      });
     });
 
     socket.on('battlemap:update-settings', (payload, ack) => {
@@ -820,18 +1313,40 @@ app.prepare().then(async () => {
         return;
       }
 
+      const requestedImageId = payload?.battlemapImageId || payload?.imageId || null;
+      if (supportsBattlemapImages) {
+        ensureBattlemapHasAtLeastOneImage(battlemap);
+      }
+
       const coverInput = payload?.cover || {};
       const coverId =
         typeof coverInput.id === 'string' && coverInput.id.trim() !== ''
           ? coverInput.id
           : generateCoverId();
       const sanitized = sanitizeCover({ ...coverInput, id: coverId });
-      battlemap.covers.set(sanitized.id, sanitized);
+      if (supportsBattlemapCoverImageId && battlemap.activeImageId) {
+        const effectiveImageId =
+          typeof requestedImageId === 'string' && requestedImageId.trim() !== ''
+            ? requestedImageId
+            : battlemap.activeImageId;
+        const key = `${effectiveImageId}:${sanitized.id}`;
+        battlemap.covers.set(key, { ...sanitized, _imageId: effectiveImageId });
+      } else {
+        battlemap.covers.set(sanitized.id, sanitized);
+      }
 
       logEvent('Added cover', sanitized.id, 'to', battlemap.id);
       respond(ack, { ok: true, coverId: sanitized.id });
       emitBattlemapUpdate(battlemap.id);
-      runBackgroundTask('upsert cover', () => upsertCoverRow(battlemap.id, sanitized));
+      runBackgroundTask('upsert cover', () => {
+        const imageIdToPersist =
+          supportsBattlemapCoverImageId && battlemap.activeImageId
+            ? (typeof requestedImageId === 'string' && requestedImageId.trim() !== ''
+                ? requestedImageId
+                : battlemap.activeImageId)
+            : null;
+        return upsertCoverRow(battlemap.id, sanitized, imageIdToPersist);
+      });
     });
 
     socket.on('battlemap:update-cover', (payload, ack) => {
@@ -846,19 +1361,25 @@ app.prepare().then(async () => {
         return;
       }
 
-      const existing = coverId ? battlemap.covers.get(coverId) : null;
-      if (!existing) {
+      const requestedImageId = payload?.battlemapImageId || payload?.imageId || null;
+      const entry = coverId ? findCoverEntry(battlemap, coverId, requestedImageId) : null;
+      if (!entry || !entry.existing) {
         respond(ack, { ok: false, error: 'cover-not-found' });
         return;
       }
 
+      const existing = entry.existing;
       const sanitized = sanitizeCover({ ...existing, ...payload?.updates, id: coverId });
-      battlemap.covers.set(sanitized.id, sanitized);
+      if (supportsBattlemapCoverImageId && entry.imageId) {
+        battlemap.covers.set(entry.key, { ...sanitized, _imageId: entry.imageId });
+      } else {
+        battlemap.covers.set(entry.key, sanitized);
+      }
 
       logEvent('Updated cover', coverId, 'on', battlemap.id);
       respond(ack, { ok: true });
       emitBattlemapUpdate(battlemap.id);
-      runBackgroundTask('update cover', () => upsertCoverRow(battlemap.id, sanitized));
+      runBackgroundTask('update cover', () => upsertCoverRow(battlemap.id, sanitized, entry.imageId ?? null));
     });
 
     socket.on('battlemap:remove-cover', (payload, ack) => {
@@ -873,12 +1394,14 @@ app.prepare().then(async () => {
         return;
       }
 
-      if (!coverId || !battlemap.covers.has(coverId)) {
+      const requestedImageId = payload?.battlemapImageId || payload?.imageId || null;
+      const entry = coverId ? findCoverEntry(battlemap, coverId, requestedImageId) : null;
+      if (!coverId || !entry) {
         respond(ack, { ok: false, error: 'cover-not-found' });
         return;
       }
 
-      battlemap.covers.delete(coverId);
+      battlemap.covers.delete(entry.key);
 
       logEvent('Removed cover', coverId, 'from', battlemap.id);
       respond(ack, { ok: true });

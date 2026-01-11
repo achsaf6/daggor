@@ -20,6 +20,12 @@ interface SidebarToolbarProps {
   isSquareToolActive: boolean;
   isSquareToolLocked: boolean;
   gridData: GridData;
+  floorCount?: number;
+  floorIndex?: number;
+  floorLabel?: string | null;
+  onPrevFloor?: () => void;
+  onNextFloor?: () => void;
+  floorControlsDisabled?: boolean;
 }
 
 export const SidebarToolbar = ({
@@ -35,6 +41,12 @@ export const SidebarToolbar = ({
   isSquareToolActive,
   isSquareToolLocked,
   gridData,
+  floorCount = 0,
+  floorIndex = 0,
+  floorLabel = null,
+  onPrevFloor,
+  onNextFloor,
+  floorControlsDisabled = false,
 }: SidebarToolbarProps) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMapManagerOpen, setIsMapManagerOpen] = useState(false);
@@ -169,6 +181,43 @@ export const SidebarToolbar = ({
           </div>
         )}
       </div>
+
+      {/* Floor Controls */}
+      {floorCount > 1 && typeof onPrevFloor === "function" && typeof onNextFloor === "function" && (
+        <div className="flex flex-col gap-1">
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPrevFloor();
+              }}
+              disabled={floorControlsDisabled}
+              className="flex-1 rounded-md px-2 py-2 text-white hover:bg-black/90 transition-all border border-white/10 disabled:opacity-50"
+              aria-label="Previous floor"
+              title="Previous floor"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNextFloor();
+              }}
+              disabled={floorControlsDisabled}
+              className="flex-1 rounded-md px-2 py-2 text-white hover:bg-black/90 transition-all border border-white/10 disabled:opacity-50"
+              aria-label="Next floor"
+              title="Next floor"
+            >
+              ›
+            </button>
+          </div>
+          <div className="text-[10px] text-white/60 text-center px-1">
+            {floorLabel ? floorLabel : `Floor ${floorIndex + 1}`} ({floorIndex + 1}/{floorCount})
+          </div>
+        </div>
+      )}
 
       {/* Token Picker */}
       <div className="relative">
