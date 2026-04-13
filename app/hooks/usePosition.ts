@@ -233,7 +233,8 @@ export const usePosition = (
         gridSnapConfig.gridScale ?? 1.0,
         gridSnapConfig.gridOffsetX ?? 0,
         gridSnapConfig.gridOffsetY ?? 0,
-        gridSnapConfig.tokenSize
+        gridSnapConfig.tokenSize,
+        imageBounds
       );
       onPositionUpdate(snappedPosition);
       setLastPosition(null);

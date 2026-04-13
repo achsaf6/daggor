@@ -1,5 +1,6 @@
 import { ImageBounds } from '../../types';
 import { useCoordinateMapper } from '../../hooks/useCoordinateMapper';
+import { computeGridLines } from '../../utils/grid';
 
 export const getRelativeImageOffsets = (imageBounds: ImageBounds) => ({
   left: imageBounds.left - imageBounds.containerLeft,
@@ -34,123 +35,54 @@ export const GridLines = ({
 
   if (!imageBounds || !gridData) return null;
 
-  const { verticalLines, horizontalLines, imageWidth, imageHeight } = gridData;
+  const { imageWidth, imageHeight } = gridData;
 
-  // Calculate average spacing from original lines
-  const calculateAverageSpacing = (lines: number[]): number => {
-    if (lines.length < 2) return 0;
-    const sorted = [...lines].sort((a, b) => a - b);
-    const intervals: number[] = [];
-    for (let i = 1; i < sorted.length; i++) {
-      intervals.push(sorted[i] - sorted[i - 1]);
-    }
-    return intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
-  };
-
-  // Generate scaled grid lines with origin (0,0) at the center
-  const generateScaledLines = (
-    originalLines: number[],
-    dimension: number,
-    centerPoint: number,
-    extraPositive: number = 0,
-    extraNegative: number = 0
-  ): number[] => {
-    if (originalLines.length === 0) return [];
-    
-    const sorted = [...originalLines].sort((a, b) => a - b);
-    const avgSpacing = calculateAverageSpacing(sorted);
-    
-    if (avgSpacing <= 0) return sorted; // Fallback to original if can't calculate spacing
-    
-    const scaledSpacing = avgSpacing * gridScale;
-    
-    // Always generate grid with origin (0,0) at the center point
-    // The center point will always have a grid line passing through it
-    const scaledLines: number[] = [];
-    
-    // Generate lines starting from center (origin) and going outward
-    // Center line represents 0 in the grid coordinate system
-    scaledLines.push(centerPoint);
-    
-    // Generate lines going right/down from center (positive coordinates)
-    let pos = centerPoint + scaledSpacing;
-    const positiveLimit = dimension + extraPositive + scaledSpacing;
-    while (pos < positiveLimit) {
-      scaledLines.push(pos);
-      pos += scaledSpacing;
-    }
-    
-    // Generate lines going left/up from center (negative coordinates)
-    pos = centerPoint - scaledSpacing;
-    const negativeLimit = -extraNegative - scaledSpacing;
-    while (pos >= negativeLimit) {
-      scaledLines.push(pos);
-      pos -= scaledSpacing;
-    }
-    
-    return scaledLines.sort((a, b) => a - b);
-  };
-
-  // Calculate center points
-  const centerX = imageWidth / 2;
-  const centerY = imageHeight / 2;
-
-  // Use coordinate mapper for proper scaling, fallback to direct calculation if not ready
-  // Use uniform scale (minimum of X and Y) to ensure grid cells are always squares
-  const scaleX = coordinateMapper.isReady 
-    ? coordinateMapper.getScaleX() 
+  // Use per-axis scale so grid lines and tokens share the same coordinate mapping.
+  // uniformScale (Math.min) was previously used to keep cells square on screen, but it
+  // misaligns with token rendering (which uses scaleX for X and scaleY for Y), causing
+  // snapped tokens to appear in the wrong cells on non-square images.
+  // With real gridData (actual image dimensions), scaleX == scaleY anyway.
+  const scaleX = coordinateMapper.isReady
+    ? coordinateMapper.getScaleX()
     : imageBounds.width / imageWidth;
-  const scaleY = coordinateMapper.isReady 
-    ? coordinateMapper.getScaleY() 
+  const scaleY = coordinateMapper.isReady
+    ? coordinateMapper.getScaleY()
     : imageBounds.height / imageHeight;
-  // Use the minimum scale to ensure squares regardless of image aspect ratio
-  const uniformScale = Math.min(scaleX, scaleY);
 
+  // Extend lines beyond image bounds to fill the container when it is larger than the image.
+  // With per-axis scaling, imageSize * scale == boundsSize exactly, so shortfall is 0;
+  // extras are only needed to cover the offset shift.
   const calculateCoverageExtras = (
     imageSize: number,
     boundsSize: number,
+    scale: number,
     offset: number
   ) => {
-    const worldSizeNeeded =
-      uniformScale > 0 ? boundsSize / uniformScale : imageSize;
+    const worldSizeNeeded = scale > 0 ? boundsSize / scale : imageSize;
     const shortfall = Math.max(0, worldSizeNeeded - imageSize);
-
     return {
       extraPositive: shortfall + Math.max(0, -offset),
       extraNegative: Math.max(0, offset),
     };
   };
 
-  const verticalExtras = calculateCoverageExtras(
-    imageWidth,
-    imageBounds.width,
-    gridOffsetX
-  );
-  const horizontalExtras = calculateCoverageExtras(
-    imageHeight,
-    imageBounds.height,
-    gridOffsetY
-  );
+  const vExtras = calculateCoverageExtras(imageWidth, imageBounds.width, scaleX, gridOffsetX);
+  const hExtras = calculateCoverageExtras(imageHeight, imageBounds.height, scaleY, gridOffsetY);
 
-  // Apply scale to grid lines (centered) and extend coverage as needed
-  const scaledVerticalLines = generateScaledLines(
-    verticalLines,
-    imageWidth,
-    centerX,
-    verticalExtras.extraPositive,
-    verticalExtras.extraNegative
+  // computeGridLines is the single source of truth for line positions.
+  // snapToGridCenter uses the same function so snapping always aligns with what is rendered.
+  const { xLines, yLines } = computeGridLines(
+    gridData,
+    gridScale,
+    gridOffsetX,
+    gridOffsetY,
+    vExtras.extraPositive,
+    vExtras.extraNegative,
+    hExtras.extraPositive,
+    hExtras.extraNegative,
+    scaleX,
+    scaleY
   );
-  const scaledHorizontalLines = generateScaledLines(
-    horizontalLines,
-    imageHeight,
-    centerY,
-    horizontalExtras.extraPositive,
-    horizontalExtras.extraNegative
-  );
-
-  // Apply offset to grid lines
-  const offsetVerticalLines = scaledVerticalLines.map(line => line + gridOffsetX);
-  const offsetHorizontalLines = scaledHorizontalLines.map(line => line + gridOffsetY);
 
   const relativeOffsets = getRelativeImageOffsets(imageBounds);
 
@@ -172,12 +104,12 @@ export const GridLines = ({
       fill="none"
     >
       {/* Vertical gridlines */}
-      {offsetVerticalLines.map((x, index) => (
+      {xLines.map((x, index) => (
         <line
           key={`v-${index}`}
-          x1={x * uniformScale}
+          x1={x * scaleX}
           y1={0}
-          x2={x * uniformScale}
+          x2={x * scaleX}
           y2={imageBounds.height}
           stroke="rgba(255, 255, 255, 0.3)"
           strokeWidth="1"
@@ -186,13 +118,13 @@ export const GridLines = ({
       ))}
 
       {/* Horizontal gridlines */}
-      {offsetHorizontalLines.map((y, index) => (
+      {yLines.map((y, index) => (
         <line
           key={`h-${index}`}
           x1={0}
-          y1={y * uniformScale}
+          y1={y * scaleY}
           x2={imageBounds.width}
-          y2={y * uniformScale}
+          y2={y * scaleY}
           stroke="rgba(255, 255, 255, 0.3)"
           strokeWidth="1"
           fill="none"

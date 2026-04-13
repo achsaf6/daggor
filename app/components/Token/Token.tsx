@@ -5,6 +5,7 @@ import {
   getViewportSize,
   positionToImageRelative,
 } from "../../utils/coordinates";
+import { computeGridLines } from "../../utils/grid";
 import { useCoordinateMapper } from "../../hooks/useCoordinateMapper";
 import { getTokenSizeUnits } from "../../utils/tokenSizes";
 
@@ -106,43 +107,25 @@ export const Token = ({
       return getViewportSize(5, imageBounds); // 5% default
     }
 
-    const { verticalLines, horizontalLines } = gridData;
-    
-    // Calculate average spacing from original lines (same logic as GridLines)
-    const calculateAverageSpacing = (lines: number[]): number => {
-      if (lines.length < 2) return 0;
-      const sorted = [...lines].sort((a, b) => a - b);
-      const intervals: number[] = [];
-      for (let i = 1; i < sorted.length; i++) {
-        intervals.push(sorted[i] - sorted[i - 1]);
-      }
-      return intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
-    };
-
-    const avgVerticalSpacing = calculateAverageSpacing(verticalLines);
-    const avgHorizontalSpacing = calculateAverageSpacing(horizontalLines);
-    const avgSpacing = Math.max(avgVerticalSpacing, avgHorizontalSpacing) || avgVerticalSpacing || avgHorizontalSpacing;
-    
-    if (avgSpacing <= 0) {
-      // Fallback if can't calculate spacing
-      return getViewportSize(5, imageBounds);
-    }
-
-    // Calculate scaled spacing (grid square size in world pixels)
-    const scaledSpacing = avgSpacing * gridScale;
-
     // Convert to viewport percentage
     // Only use coordinate mapper after mount to prevent hydration mismatch
     if (isMounted && coordinateMapper.isReady && worldMapWidth > 0 && worldMapHeight > 0) {
-      // Use coordinate mapper for proper scaling
-      const sizeScale = coordinateMapper.getSizeScale();
-      const sizeInScreenPixels = scaledSpacing * sizeScale;
+      // getSizeScale() already returns min(scaleX, scaleY) = uniformScale,
+      // so baseSpacing * getSizeScale() = the square cell side on screen.
+      // Do NOT pass scaleX/scaleY to computeGridLines here — that would double-apply
+      // the square factor (once in spacingX, once in getSizeScale).
+      const { spacingX } = computeGridLines(gridData, gridScale);
+      if (spacingX <= 0) return getViewportSize(5, imageBounds);
+      const sizeInScreenPixels = spacingX * coordinateMapper.getSizeScale();
       return (sizeInScreenPixels / imageBounds.containerWidth) * 100;
     } else {
-      // Fallback: convert directly using image bounds
+      // Fallback: apply square-grid adjustment explicitly.
+      // spacingX_adj * scaleX = baseSpacing * uniformScale = square cell side.
       const scaleX = imageBounds.width / gridData.imageWidth;
-      const sizeInScreenPixels = scaledSpacing * scaleX;
-      return (sizeInScreenPixels / imageBounds.containerWidth) * 100;
+      const scaleY = imageBounds.height / gridData.imageHeight;
+      const { spacingX } = computeGridLines(gridData, gridScale, 0, 0, 0, 0, 0, 0, scaleX, scaleY);
+      if (spacingX <= 0) return getViewportSize(5, imageBounds);
+      return (spacingX * scaleX / imageBounds.containerWidth) * 100;
     }
   };
 

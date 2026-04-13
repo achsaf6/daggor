@@ -1,6 +1,7 @@
 import { ImageBounds, Position, TokenSize } from "../types";
 import { ImageRelativePosition, ScreenPosition } from "../hooks/useCoordinateMapper";
 import { getTokenSnapConfig } from "./tokenSizes";
+import { computeGridLines } from "./grid";
 
 /**
  * Convert image-relative percentage coordinates to viewport coordinates
@@ -120,34 +121,29 @@ export const snapToGridCenter = (
   gridScale: number = 1.0,
   gridOffsetX: number = 0,
   gridOffsetY: number = 0,
-  tokenSize?: TokenSize
+  tokenSize?: TokenSize,
+  imageBounds?: ImageBounds | null
 ): Position => {
-  // Calculate average spacing from original lines (same logic as GridLines)
-  const calculateAverageSpacing = (lines: number[]): number => {
-    if (lines.length < 2) return 0;
-    const sorted = [...lines].sort((a, b) => a - b);
-    const intervals: number[] = [];
-    for (let i = 1; i < sorted.length; i++) {
-      intervals.push(sorted[i] - sorted[i - 1]);
-    }
-    return intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
-  };
+  const { imageWidth, imageHeight } = gridData;
 
-  const { verticalLines, horizontalLines, imageWidth, imageHeight } = gridData;
-  
-  const avgVerticalSpacing = calculateAverageSpacing(verticalLines);
-  const avgHorizontalSpacing = calculateAverageSpacing(horizontalLines);
-  const avgSpacing = Math.max(avgVerticalSpacing, avgHorizontalSpacing) || avgVerticalSpacing || avgHorizontalSpacing;
-  
-  if (avgSpacing <= 0) {
-    // Can't snap if we can't calculate spacing
-    return position;
-  }
+  // Derive scales so computeGridLines can apply the square-grid adjustment,
+  // matching exactly what GridLines renders.
+  const scaleX = imageBounds && imageWidth > 0 ? imageBounds.width / imageWidth : undefined;
+  const scaleY = imageBounds && imageHeight > 0 ? imageBounds.height / imageHeight : undefined;
 
-  // Calculate scaled spacing
-  const scaledSpacing = avgSpacing * gridScale;
+  // Derive spacings from the same function that GridLines uses to render,
+  // so snapping always targets the lines that are actually on screen.
+  const { spacingX: scaledSpacingX, spacingY: scaledSpacingY } = computeGridLines(
+    gridData,
+    gridScale,
+    gridOffsetX,
+    gridOffsetY,
+    0, 0, 0, 0,
+    scaleX,
+    scaleY
+  );
 
-  if (scaledSpacing <= 0) {
+  if (scaledSpacingX <= 0 || scaledSpacingY <= 0) {
     return position;
   }
 
@@ -171,16 +167,16 @@ export const snapToGridCenter = (
   // Determine snapping cadence based on token size
   const { step: snapStep, phase: snapPhase } = getTokenSnapConfig(tokenSize);
 
-  const unitX = relativeX / scaledSpacing;
-  const unitY = relativeY / scaledSpacing;
+  const unitX = relativeX / scaledSpacingX;
+  const unitY = relativeY / scaledSpacingY;
 
   const snappedUnitX =
     Math.round((unitX - snapPhase) / snapStep) * snapStep + snapPhase;
   const snappedUnitY =
     Math.round((unitY - snapPhase) / snapStep) * snapStep + snapPhase;
 
-  const gridX = snappedUnitX * scaledSpacing;
-  const gridY = snappedUnitY * scaledSpacing;
+  const gridX = snappedUnitX * scaledSpacingX;
+  const gridY = snappedUnitY * scaledSpacingY;
 
   // Convert back to absolute world coordinates
   const snappedWorldX = centerX + gridX + gridOffsetX;

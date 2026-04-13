@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { GridData } from "../../../utils/gridData";
+import { computeGridLines } from "../../../utils/grid";
 
 interface HorizontalSquaresInputProps {
   gridScale: number;
@@ -14,20 +15,9 @@ export const HorizontalSquaresInput = ({
   onGridScaleChange,
   gridData,
 }: HorizontalSquaresInputProps) => {
-  // Calculate average spacing from grid lines
-  const calculateAverageSpacing = (lines: number[]): number => {
-    if (lines.length < 2) return 0;
-    const sorted = [...lines].sort((a, b) => a - b);
-    const intervals: number[] = [];
-    for (let i = 1; i < sorted.length; i++) {
-      intervals.push(sorted[i] - sorted[i - 1]);
-    }
-    return intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
-  };
-
-  const avgVerticalSpacing = useMemo(
-    () => calculateAverageSpacing(gridData.verticalLines),
-    [gridData.verticalLines]
+  const { spacingX: avgVerticalSpacing } = useMemo(
+    () => computeGridLines(gridData, 1.0), // gridScale=1 to get base spacing
+    [gridData]
   );
 
   // Calculate number of horizontal squares

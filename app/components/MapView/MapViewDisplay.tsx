@@ -339,7 +339,8 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
           gridScale,
           gridOffsetX,
           gridOffsetY,
-          draggingToken.size
+          draggingToken.size,
+          imageBounds
         );
       }
 
