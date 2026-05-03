@@ -1,11 +1,30 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { ChevronLeft, ChevronRight, Cloud, CloudOff, Layers, Settings as SettingsIcon, Users } from "lucide-react";
 import { MapSettings } from "./Settings/MapSettings";
 import { TokenPicker } from "./TokenPicker";
 import { BattlemapManager } from "./BattlemapManager";
 import { GridData } from "../../utils/gridData";
 import { TokenTemplate } from "../../types";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+
+// Three semantic active-state colors so the GM can tell at a glance which
+// tool is on. Cover = primary (general structures), spawn = success (player
+// spawn), fog = warning (concealment). Matches the in-canvas preview colors.
+// Belle Époque vocabulary: tool icons sit directly on the cream parchment.
+// Idle icons render as warm-ink brass; active tools fill with the same brass
+// gradient as the panel frames so the active state reads as "engraved
+// emphasis" rather than a UI button color shift.
+const TOOL_ACTIVE_BG: Record<"spawn" | "fog", string> = {
+  spawn:
+    "bg-[var(--brass-deep)] text-[var(--parchment-bright)] hover:bg-[var(--brass-shadow)]",
+  fog:
+    "bg-[var(--brass-deep)] text-[var(--parchment-bright)] hover:bg-[var(--brass-shadow)]",
+};
+const TOOL_BASE = "rounded-sm p-3 transition-colors";
+const TOOL_INACTIVE =
+  "text-[var(--brass-deep)] hover:text-[var(--brass-shadow)] hover:bg-[rgba(201,162,74,0.18)]";
 
 interface SidebarToolbarProps {
   gridScale: number;
@@ -15,10 +34,12 @@ interface SidebarToolbarProps {
   onGridOffsetChange: (x: number, y: number) => void;
   onTokenDragStart: (tokenTemplate: TokenTemplate) => void;
   onTokenDragEnd: () => void;
-  onSquareToolToggle: () => void;
-  onSquareToolLockToggle: () => void;
-  isSquareToolActive: boolean;
-  isSquareToolLocked: boolean;
+  onSpawnToolToggle: () => void;
+  isSpawnToolActive: boolean;
+  onFogToolToggle: () => void;
+  isFogToolActive: boolean;
+  onFogClear: () => void;
+  fogReady: boolean;
   gridData: GridData;
   floorCount?: number;
   floorIndex?: number;
@@ -36,10 +57,12 @@ export const SidebarToolbar = ({
   onGridOffsetChange,
   onTokenDragStart,
   onTokenDragEnd,
-  onSquareToolToggle,
-  onSquareToolLockToggle,
-  isSquareToolActive,
-  isSquareToolLocked,
+  onSpawnToolToggle,
+  isSpawnToolActive,
+  onFogToolToggle,
+  isFogToolActive,
+  onFogClear,
+  fogReady,
   gridData,
   floorCount = 0,
   floorIndex = 0,
@@ -51,9 +74,6 @@ export const SidebarToolbar = ({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMapManagerOpen, setIsMapManagerOpen] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const squareToolPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const squareToolPressStartRef = useRef<number | null>(null);
-  const squareToolLongPressDetectedRef = useRef<boolean>(false);
 
   // Close settings when clicking outside
   useEffect(() => {
@@ -73,58 +93,35 @@ export const SidebarToolbar = ({
     };
   }, [isSettingsOpen, isMapManagerOpen]);
 
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (squareToolPressTimerRef.current) {
-        clearTimeout(squareToolPressTimerRef.current);
-      }
-    };
-  }, []);
-
   return (
     <div
       ref={toolbarRef}
-      className="fixed left-4 top-1/4 -translate-y-1/2 z-50 bg-black/80 backdrop-blur-sm rounded-lg shadow-lg border border-white/20 flex flex-col p-1 gap-1"
+      className="parchment-panel fixed left-4 top-1/4 -translate-y-1/2 z-50 shadow-lg flex flex-col p-1 gap-1 border border-[var(--brass-deep)]"
     >
-      {/* Settings Button with Gear Icon */}
+      {/* Settings */}
       <div className="relative">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsSettingsOpen(!isSettingsOpen);
-          }}
-          className={`relative rounded-md p-3 text-white hover:bg-black/90 transition-all ${
-            isSettingsOpen ? "bg-black/90" : ""
-          }`}
-          aria-label="Settings"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-          </svg>
-          {/* Dropdown indicator triangle */}
-          <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-white/60" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsSettingsOpen(!isSettingsOpen);
+              }}
+              className={`relative ${TOOL_BASE} ${
+                isSettingsOpen ? "bg-[rgba(201,162,74,0.25)] text-[var(--brass-shadow)]" : TOOL_INACTIVE
+              }`}
+              aria-label="Settings"
+            >
+              <SettingsIcon className="h-6 w-6" strokeWidth={2} />
+              <div className="absolute bottom-1 right-1 w-0 h-0 border-l-[5px] border-l-transparent border-b-[5px] border-b-[var(--brass-deep)]" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
 
-        {/* Settings Dropdown */}
         {isSettingsOpen && (
-          <div className="absolute left-full ml-2 top-0 bg-black/80 backdrop-blur-sm rounded-lg p-4 shadow-lg border border-white/20 min-w-[280px]">
+          <div className="parchment-panel absolute left-full ml-2 top-0 border border-[var(--brass-deep)] p-4 shadow-lg min-w-[280px]">
             <MapSettings
               gridScale={gridScale}
               onGridScaleChange={onGridScaleChange}
@@ -137,52 +134,37 @@ export const SidebarToolbar = ({
         )}
       </div>
 
-      {/* Map Manager Button */}
+      {/* Map manager */}
       <div className="relative">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsMapManagerOpen(!isMapManagerOpen);
-            if (!isMapManagerOpen) {
-              setIsSettingsOpen(false);
-            }
-          }}
-          className={`relative rounded-md p-3 text-white hover:bg-black/90 transition-all ${
-            isMapManagerOpen ? "bg-black/90" : ""
-          }`}
-          aria-label="Battlemap Manager"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3 7l6-3 6 3 6-3v13l-6 3-6-3-6 3V7z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 4v13m6-10v13"
-            />
-          </svg>
-          {/* Dropdown indicator triangle */}
-          <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-white/60" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsMapManagerOpen(!isMapManagerOpen);
+                if (!isMapManagerOpen) setIsSettingsOpen(false);
+              }}
+              className={`relative ${TOOL_BASE} ${
+                isMapManagerOpen ? "bg-[rgba(201,162,74,0.25)] text-[var(--brass-shadow)]" : TOOL_INACTIVE
+              }`}
+              aria-label="Battlemap Manager"
+            >
+              <Layers className="h-6 w-6" strokeWidth={2} />
+              <div className="absolute bottom-1 right-1 w-0 h-0 border-l-[5px] border-l-transparent border-b-[5px] border-b-[var(--brass-deep)]" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Maps</TooltipContent>
+        </Tooltip>
 
         {isMapManagerOpen && (
-          <div className="absolute left-full ml-2 top-0 bg-black/80 backdrop-blur-sm rounded-lg p-4 shadow-lg border border-white/20 w-[400px] max-h-[70vh] overflow-hidden flex flex-col">
+          <div className="parchment-panel absolute left-full ml-2 top-0 border border-[var(--brass-deep)] p-4 shadow-lg w-[400px] max-h-[70vh] overflow-hidden flex flex-col">
             <BattlemapManager onClose={() => setIsMapManagerOpen(false)} />
           </div>
         )}
       </div>
 
-      {/* Floor Controls */}
+      {/* Floor controls */}
       {floorCount > 1 && typeof onPrevFloor === "function" && typeof onNextFloor === "function" && (
         <div className="flex flex-col gap-1">
           <div className="flex gap-1">
@@ -193,11 +175,11 @@ export const SidebarToolbar = ({
                 onPrevFloor();
               }}
               disabled={floorControlsDisabled}
-              className="flex-1 rounded-md px-2 py-2 text-white hover:bg-black/90 transition-all border border-white/10 disabled:opacity-50"
+              className="flex-1 rounded-sm px-2 py-2 text-[var(--brass-deep)] hover:text-[var(--brass-shadow)] hover:bg-[rgba(201,162,74,0.18)] transition-colors disabled:opacity-50 flex items-center justify-center"
               aria-label="Previous floor"
               title="Previous floor"
             >
-              ‹
+              <ChevronLeft className="h-4 w-4" />
             </button>
             <button
               type="button"
@@ -206,111 +188,76 @@ export const SidebarToolbar = ({
                 onNextFloor();
               }}
               disabled={floorControlsDisabled}
-              className="flex-1 rounded-md px-2 py-2 text-white hover:bg-black/90 transition-all border border-white/10 disabled:opacity-50"
+              className="flex-1 rounded-sm px-2 py-2 text-[var(--brass-deep)] hover:text-[var(--brass-shadow)] hover:bg-[rgba(201,162,74,0.18)] transition-colors disabled:opacity-50 flex items-center justify-center"
               aria-label="Next floor"
               title="Next floor"
             >
-              ›
+              <ChevronRight className="h-4 w-4" />
             </button>
           </div>
-          <div className="text-[10px] text-white/60 text-center px-1">
+          <div className="parchment-numeric text-center px-1" style={{ fontSize: "0.65rem", color: "var(--brass-deep)" }}>
             {floorLabel ? floorLabel : `Floor ${floorIndex + 1}`} ({floorIndex + 1}/{floorCount})
           </div>
         </div>
       )}
 
-      {/* Token Picker */}
+      {/* Token picker */}
       <div className="relative">
         <TokenPicker onTokenDragStart={onTokenDragStart} onTokenDragEnd={onTokenDragEnd} />
       </div>
 
-      {/* Square Cover Tool */}
-      <button
-        onMouseDown={(e) => {
-          e.stopPropagation();
-          if (isSquareToolLocked) {
-            return;
-          }
-          squareToolPressStartRef.current = Date.now();
-          squareToolLongPressDetectedRef.current = false;
-          squareToolPressTimerRef.current = setTimeout(() => {
-            squareToolLongPressDetectedRef.current = true;
-            onSquareToolLockToggle();
-            if (squareToolPressTimerRef.current) {
-              clearTimeout(squareToolPressTimerRef.current);
-              squareToolPressTimerRef.current = null;
-            }
-            squareToolPressStartRef.current = null;
-          }, 500);
-        }}
-        onMouseUp={(e) => {
-          e.stopPropagation();
-          if (squareToolPressTimerRef.current) {
-            clearTimeout(squareToolPressTimerRef.current);
-            squareToolPressTimerRef.current = null;
-          }
+      {/* Spawn area — single-shot drag. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSpawnToolToggle();
+            }}
+            className={`${TOOL_BASE} ${
+              isSpawnToolActive ? TOOL_ACTIVE_BG.spawn : TOOL_INACTIVE
+            }`}
+            aria-label="Spawn area tool"
+            aria-pressed={isSpawnToolActive}
+          >
+            <Users className="h-6 w-6" strokeWidth={2} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">Spawn area — drag a rectangle</TooltipContent>
+      </Tooltip>
 
-          if (squareToolLongPressDetectedRef.current) {
-            squareToolLongPressDetectedRef.current = false;
-            squareToolPressStartRef.current = null;
-            return;
-          }
-
-          if (isSquareToolLocked) {
-            onSquareToolLockToggle();
-            squareToolPressStartRef.current = null;
-            squareToolLongPressDetectedRef.current = false;
-            return;
-          }
-
-          const pressDuration = squareToolPressStartRef.current
-            ? Date.now() - squareToolPressStartRef.current
-            : 0;
-
-          if (pressDuration < 500) {
-            onSquareToolToggle();
-          }
-
-          squareToolPressStartRef.current = null;
-          squareToolLongPressDetectedRef.current = false;
-        }}
-        onMouseLeave={() => {
-          if (squareToolPressTimerRef.current) {
-            clearTimeout(squareToolPressTimerRef.current);
-            squareToolPressTimerRef.current = null;
-          }
-          squareToolPressStartRef.current = null;
-          squareToolLongPressDetectedRef.current = false;
-        }}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        className={`rounded-md p-3 text-white transition-all ${
-          isSquareToolActive
-            ? isSquareToolLocked
-              ? "bg-red-700/90 hover:bg-red-800/90"
-              : "bg-red-600/90 hover:bg-red-700/90"
-            : "hover:bg-black/90"
-        }`}
-        aria-label="Square Cover Tool"
-        title={
-          isSquareToolLocked
-            ? "Square tool locked - click to unlock"
-            : "Click to create one square, hold for 0.5s to lock"
-        }
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          className="h-6 w-6"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-        </svg>
-      </button>
+      {/* Fog — drag to reveal; right-click to clear. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onFogToolToggle();
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (fogReady) onFogClear();
+            }}
+            className={`${TOOL_BASE} ${
+              isFogToolActive ? TOOL_ACTIVE_BG.fog : TOOL_INACTIVE
+            }`}
+            aria-label="Fog of war"
+            aria-pressed={isFogToolActive}
+          >
+            {isFogToolActive ? (
+              <Cloud className="h-6 w-6" strokeWidth={2} />
+            ) : (
+              <CloudOff className="h-6 w-6" strokeWidth={2} />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          {fogReady ? "Fog — drag to reveal · right-click to clear" : "Fog — drag to reveal"}
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 };

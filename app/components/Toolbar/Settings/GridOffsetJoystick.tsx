@@ -188,16 +188,20 @@ export const GridOffsetJoystick = ({
 
   return (
     <div>
-      <label className="block text-white text-sm font-medium mb-2">
+      <label className="parchment-numeric block text-xs mb-2" style={{ color: "var(--parchment-ink-muted)" }}>
         Grid Offset
       </label>
       <div
         ref={joystickRef}
-        className="relative border-2 border-white/30 rounded-lg bg-gray-800/50 cursor-crosshair select-none focus:outline-none focus:ring-2 focus:ring-white/50"
+        className="relative cursor-crosshair select-none focus:outline-none"
         style={{
           width: `${joystickSize}px`,
           height: `${joystickSize}px`,
           margin: "0 auto",
+          borderColor: "var(--brass-deep)",
+          borderStyle: "solid",
+          borderWidth: 1,
+          background: "rgba(255, 252, 240, 0.4)",
         }}
         tabIndex={0}
         onClick={handleClick}
@@ -206,9 +210,11 @@ export const GridOffsetJoystick = ({
         onMouseLeave={handleMouseUp}
         onKeyDown={handleKeyDown}
       >
-        {/* Draggable knob */}
+        <div className="absolute inset-y-0 left-1/2 -translate-x-px w-px" style={{ background: "rgba(110, 83, 32, 0.3)" }} aria-hidden />
+        <div className="absolute inset-x-0 top-1/2 -translate-y-px h-px" style={{ background: "rgba(110, 83, 32, 0.3)" }} aria-hidden />
+
         <div
-          className="absolute bg-white rounded-full shadow-lg transition-transform"
+          className="absolute rounded-full shadow-lg"
           style={{
             width: `${knobSize}px`,
             height: `${knobSize}px`,
@@ -217,22 +223,24 @@ export const GridOffsetJoystick = ({
             transform: "translate(-50%, -50%)",
             cursor: isDragging ? "grabbing" : "grab",
             transition: isDragging ? "none" : "all 0.1s ease-out",
+            backgroundColor: "var(--brass-deep)",
+            boxShadow: "0 0 0 2px var(--parchment-bright), 0 0 0 3px var(--brass-shadow)",
           }}
         />
 
-        {/* Center dot */}
         <div
-          className="absolute bg-white/50 rounded-full"
+          className="absolute rounded-full"
           style={{
             width: "4px",
             height: "4px",
             left: "50%",
             top: "50%",
             transform: "translate(-50%, -50%)",
+            backgroundColor: "var(--brass-shadow)",
           }}
         />
       </div>
-      <div className="flex justify-between text-xs text-gray-400 mt-2">
+      <div className="parchment-numeric flex justify-between mt-2" style={{ fontSize: "0.75rem", color: "var(--parchment-ink-muted)" }}>
         {editingField === "x" ? (
           <span className="flex items-center gap-1">
             X:{" "}
@@ -243,15 +251,15 @@ export const GridOffsetJoystick = ({
               onChange={handleInputChange}
               onBlur={handleInputSubmit}
               onKeyDown={handleInputKeyDown}
-              className="w-4 px-1 bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-white/50"
-              style={{ fontSize: "inherit" }}
+              className="parchment-numeric w-10 px-1 border focus:outline-none"
+              style={{ fontSize: "inherit", borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
             />
             px
           </span>
         ) : (
           <span
             onDoubleClick={() => handleDoubleClick("x")}
-            className="cursor-pointer hover:text-white transition-colors"
+            className="cursor-pointer transition-colors hover:text-[var(--brass-shadow)]"
           >
             X: {offsetX.toFixed(0)}px
           </span>
@@ -266,15 +274,15 @@ export const GridOffsetJoystick = ({
               onChange={handleInputChange}
               onBlur={handleInputSubmit}
               onKeyDown={handleInputKeyDown}
-              className="w-4 px-1 bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-white/50"
-              style={{ fontSize: "inherit" }}
+              className="parchment-numeric w-10 px-1 border focus:outline-none"
+              style={{ fontSize: "inherit", borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
             />
             px
           </span>
         ) : (
           <span
             onDoubleClick={() => handleDoubleClick("y")}
-            className="cursor-pointer hover:text-white transition-colors"
+            className="cursor-pointer transition-colors hover:text-[var(--brass-shadow)]"
           >
             Y: {offsetY.toFixed(0)}px
           </span>

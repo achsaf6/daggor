@@ -8,17 +8,23 @@ import React, {
   useMemo,
 } from "react";
 import { useSocket } from "../../hooks/useSocket";
+import { useSurface } from "../../hooks/useSurface";
 import { useImageBounds } from "../../hooks/useImageBounds";
 import { useCoordinateMapper } from "../../hooks/useCoordinateMapper";
 import { MapImage } from "./MapImage";
 import { TokenManager } from "../Token/TokenManager";
 import { GridLines } from "./GridLines";
+import { FogOfWar } from "./FogOfWar";
+import { FogManager } from "./FogManager";
 import { SidebarToolbar } from "../Toolbar/SidebarToolbar";
-import { CoverManager } from "../Toolbar/CoverManager";
+import { PlayerStatusPanel } from "../Dashboard/PlayerStatusPanel";
+import { InitiativePanel } from "../Dashboard/InitiativePanel";
+import { SoundboardPanel } from "../Dashboard/SoundboardPanel";
+import { useSoundboardListener } from "../../hooks/useSoundboardListener";
 import { Position, TokenTemplate } from "../../types";
 import { snapToGridCenter } from "../../utils/coordinates";
 import { DEFAULT_GRID_DATA } from "../../utils/gridData";
-import { useBattlemap } from "../../providers/BattlemapProvider";
+import { useBattlemap, type SpawnArea } from "../../providers/BattlemapProvider";
 import { getTokenSizeUnits } from "../../utils/tokenSizes";
 
 interface MapViewDisplayProps {
@@ -26,6 +32,8 @@ interface MapViewDisplayProps {
 }
 
 export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
+  const surface = useSurface();
+  const showToolbar = surface === "dashboard";
   const containerRef = useRef<HTMLDivElement>(null);
   const {
     myUserId,
@@ -36,16 +44,22 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
     updateTokenSize,
     removeToken,
     addToken,
-  } = useSocket(true);
+    socket,
+  } = useSocket(surface);
+  // Both dashboard and display surfaces play the broadcast clips so the GM
+  // hears them too, regardless of which window has focus.
+  useSoundboardListener(socket);
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const {
     currentBattlemap,
     isBattlemapLoading,
     updateBattlemapSettings,
-    addCover,
-    updateCover,
-    removeCover,
     setActiveBattlemapImage,
+    updateSpawnArea,
+    addFogArea,
+    removeFogArea,
+    updateFogArea,
+    clearFog,
     canManageBattlemaps,
   } = useBattlemap();
 
@@ -112,27 +126,6 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
     [updateBattlemapSettings]
   );
 
-  const handleCoverPositionUpdate = useCallback(
-    (id: string, x: number, y: number) => {
-      updateCover(id, { x, y });
-    },
-    [updateCover]
-  );
-
-  const handleCoverSizeUpdate = useCallback(
-    (id: string, width: number, height: number, x: number, y: number) => {
-      updateCover(id, { width, height, x, y });
-    },
-    [updateCover]
-  );
-
-  const handleCoverRemove = useCallback(
-    (id: string) => {
-      removeCover(id);
-    },
-    [removeCover]
-  );
-
   // Extract world map dimensions from gridData for coordinate mapping
   const worldMapWidth = effectiveGridData.imageWidth || 0;
   const worldMapHeight = effectiveGridData.imageHeight || 0;
@@ -146,13 +139,18 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
   const [draggingToken, setDraggingToken] = useState<TokenTemplate | null>(null);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
 
-  // Cover management
-  const covers = useMemo(() => currentBattlemap?.covers ?? [], [currentBattlemap?.covers]);
-  const [isSquareToolActive, setIsSquareToolActive] = useState(false);
-  const [isSquareToolLocked, setIsSquareToolLocked] = useState(false);
+  // Drawing tools — shared rectangle-drawing primitives used by spawn-area
+  // and fog tools. Cover tool was removed; fog took over its role.
+  const [isSpawnToolActive, setIsSpawnToolActive] = useState(false);
+  const [isFogToolActive, setIsFogToolActive] = useState(false);
   const [isDrawingSquare, setIsDrawingSquare] = useState(false);
   const [squareStartPos, setSquareStartPos] = useState<{ x: number; y: number } | null>(null);
   const [squareCurrentPos, setSquareCurrentPos] = useState<{ x: number; y: number } | null>(null);
+  const spawnArea = currentBattlemap?.spawnArea ?? null;
+  const fogShapes = useMemo(
+    () => currentBattlemap?.fogShapes ?? [],
+    [currentBattlemap?.fogShapes]
+  );
 
   const resetSquareDrawing = useCallback(() => {
     setIsDrawingSquare(false);
@@ -186,30 +184,26 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
     setDragPosition(null);
   };
 
-  const handleSquareToolToggle = () => {
-    if (isSquareToolLocked) {
-      setIsSquareToolLocked(false);
-      setIsSquareToolActive(false);
-      resetSquareDrawing();
-      return;
-    }
-
-    setIsSquareToolActive((prev) => {
+  const handleSpawnToolToggle = () => {
+    setIsSpawnToolActive((prev) => {
       const next = !prev;
-      if (!next) {
+      if (next) {
+        setIsFogToolActive(false);
+        resetSquareDrawing();
+      } else {
         resetSquareDrawing();
       }
       return next;
     });
   };
 
-  const handleSquareToolLockToggle = () => {
-    setIsSquareToolLocked((prev) => {
+  const handleFogToolToggle = () => {
+    setIsFogToolActive((prev) => {
       const next = !prev;
       if (next) {
-        setIsSquareToolActive(true);
+        setIsSpawnToolActive(false);
+        resetSquareDrawing();
       } else {
-        setIsSquareToolActive(false);
         resetSquareDrawing();
       }
       return next;
@@ -248,17 +242,16 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
       const width = maxX - minX;
       const height = maxY - minY;
 
-      // Only create cover if it has meaningful size (at least 0.5% in each dimension)
+      // Only commit if the rectangle has meaningful size (at least 0.5% per axis).
       if (width > 0.5 && height > 0.5) {
-        addCover({
-          x: minX,
-          y: minY,
-          width,
-          height,
-        });
-
-        if (!isSquareToolLocked) {
-          setIsSquareToolActive(false);
+        if (isSpawnToolActive) {
+          const spawn: SpawnArea = { x: minX, y: minY, width, height };
+          void updateSpawnArea(spawn);
+          setIsSpawnToolActive(false);
+        } else if (isFogToolActive) {
+          // Each draw adds a fog rectangle; the fog tool stays active so the
+          // GM can lay down multiple fog areas in succession.
+          void addFogArea({ x: minX, y: minY, width, height });
         }
       }
 
@@ -277,19 +270,48 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
     squareStartPos,
     squareCurrentPos,
     coordinateMapper,
-    addCover,
-    isSquareToolLocked,
+    isSpawnToolActive,
+    isFogToolActive,
+    updateSpawnArea,
+    addFogArea,
     resetSquareDrawing,
   ]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!isSquareToolActive || !imageBounds || !coordinateMapper.isReady || draggingToken) {
+    if ((!isSpawnToolActive && !isFogToolActive) || !imageBounds || !coordinateMapper.isReady || draggingToken) {
       return;
     }
 
-    // Don't start drawing if clicking on a cover (covers handle their own events)
+    // Fog tool: clicking *on* an existing fog rectangle erases that one.
+    // Drag-to-add still works on empty area. We do hit-testing in
+    // image-relative space, not pixel space, so it survives pan/zoom.
+    if (isFogToolActive && fogShapes.length > 0) {
+      const point = coordinateMapper.screenToImageRelative({
+        x: e.clientX,
+        y: e.clientY,
+      });
+      if (point) {
+        // Iterate in reverse so the most recently drawn fog (rendered on top)
+        // is erased first when shapes overlap.
+        for (let i = fogShapes.length - 1; i >= 0; i -= 1) {
+          const s = fogShapes[i];
+          if (
+            point.x >= s.x &&
+            point.x <= s.x + s.width &&
+            point.y >= s.y &&
+            point.y <= s.y + s.height
+          ) {
+            e.preventDefault();
+            void removeFogArea(s.id);
+            return;
+          }
+        }
+      }
+    }
+
+    // Don't start drawing if clicking on an interactive fog handle (move/resize).
     const target = e.target as HTMLElement;
-    if (target.closest('[data-cover]')) {
+    if (target.closest('[data-fog-handle]')) {
       return;
     }
 
@@ -353,8 +375,14 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 m-0 p-0 overflow-hidden"
-      style={{ 
+      // Projector surface gets a subtle warm vignette darkening the edges so
+      // the table reads as "lit by the map". Dashboard keeps the full canvas
+      // for clarity. The pseudo-element sits above the map (z 7) but below
+      // tokens (z 10/20) and the toolbar (z 50).
+      className={`fixed inset-0 m-0 p-0 overflow-hidden ${
+        showToolbar ? "" : "theatrical-vignette"
+      }`}
+      style={{
         touchAction: "none",
         userSelect: "none",
         WebkitUserSelect: "none",
@@ -364,42 +392,47 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onMouseDown={handleMouseDown}
+      data-testid="map-canvas"
     >
-      <SidebarToolbar
-        gridScale={gridScale}
-        onGridScaleChange={handleGridScaleChange}
-        gridOffsetX={gridOffsetX}
-        gridOffsetY={gridOffsetY}
-        onGridOffsetChange={handleGridOffsetChange}
-        onTokenDragStart={handleTokenDragStart}
-        onTokenDragEnd={handleTokenDragEnd}
-        onSquareToolToggle={handleSquareToolToggle}
-        onSquareToolLockToggle={handleSquareToolLockToggle}
-        isSquareToolActive={isSquareToolActive}
-        isSquareToolLocked={isSquareToolLocked}
-        gridData={effectiveGridData}
-        floorCount={images.length}
-        floorIndex={activeImageIndex >= 0 ? activeImageIndex : 0}
-        floorLabel={
-          images.length > 0
-            ? images[activeImageIndex >= 0 ? activeImageIndex : 0]?.name ?? "Floor"
-            : null
-        }
-        onPrevFloor={handlePrevFloor}
-        onNextFloor={handleNextFloor}
-        floorControlsDisabled={!canManageBattlemaps || isBattlemapLoading}
-      />
+      {showToolbar && (
+        <PlayerStatusPanel
+          activeUsers={otherUsers}
+          disconnectedUsers={disconnectedUsers}
+        />
+      )}
+      {showToolbar && (
+        <InitiativePanel socket={socket} activeUsers={otherUsers} />
+      )}
+      {showToolbar && <SoundboardPanel socket={socket} />}
+      {showToolbar && (
+        <SidebarToolbar
+          gridScale={gridScale}
+          onGridScaleChange={handleGridScaleChange}
+          gridOffsetX={gridOffsetX}
+          gridOffsetY={gridOffsetY}
+          onGridOffsetChange={handleGridOffsetChange}
+          onTokenDragStart={handleTokenDragStart}
+          onTokenDragEnd={handleTokenDragEnd}
+          onSpawnToolToggle={handleSpawnToolToggle}
+          isSpawnToolActive={isSpawnToolActive}
+          onFogToolToggle={handleFogToolToggle}
+          isFogToolActive={isFogToolActive}
+          onFogClear={() => void clearFog()}
+          fogReady={fogShapes.length > 0}
+          gridData={effectiveGridData}
+          floorCount={images.length}
+          floorIndex={activeImageIndex >= 0 ? activeImageIndex : 0}
+          floorLabel={
+            images.length > 0
+              ? images[activeImageIndex >= 0 ? activeImageIndex : 0]?.name ?? "Floor"
+              : null
+          }
+          onPrevFloor={handlePrevFloor}
+          onNextFloor={handleNextFloor}
+          floorControlsDisabled={!canManageBattlemaps || isBattlemapLoading}
+        />
+      )}
       <MapImage onLoad={updateBounds} src={currentBattlemap?.mapPath ?? undefined} />
-      <CoverManager
-        covers={covers}
-        imageBounds={imageBounds}
-        worldMapWidth={worldMapWidth}
-        worldMapHeight={worldMapHeight}
-        isDraggable
-        onRemoveCover={handleCoverRemove}
-        onPositionUpdate={handleCoverPositionUpdate}
-        onSizeUpdate={handleCoverSizeUpdate}
-      />
       {imageBounds && currentBattlemap && (
         <GridLines
           gridData={effectiveGridData}
@@ -407,6 +440,31 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
           gridScale={gridScale}
           gridOffsetX={gridOffsetX}
           gridOffsetY={gridOffsetY}
+        />
+      )}
+      {/* Players (display + mobile) see fully opaque fog with feathered
+          edges. The dashboard renders the same fog at lower opacity AND
+          adds interactive move/resize handles via FogManager so the GM
+          can adjust shapes after placing them. */}
+      {imageBounds && (
+        <FogOfWar
+          shapes={fogShapes}
+          imageBounds={imageBounds}
+          opacity={showToolbar ? 0.45 : 1}
+        />
+      )}
+      {showToolbar && imageBounds && (
+        <FogManager
+          shapes={fogShapes}
+          imageBounds={imageBounds}
+          worldMapWidth={worldMapWidth}
+          worldMapHeight={worldMapHeight}
+          isToolActive={isFogToolActive}
+          onMove={(id, x, y) => void updateFogArea(id, { x, y })}
+          onResize={(id, x, y, width, height) =>
+            void updateFogArea(id, { x, y, width, height })
+          }
+          onRemove={(id) => void removeFogArea(id)}
         />
       )}
       <TokenManager
@@ -420,7 +478,9 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
         gridOffsetX={gridOffsetX}
         gridOffsetY={gridOffsetY}
         isMounted={true}
-        isDisplay={true}
+        // Only the dashboard surface shows DM affordances (right-click remove,
+        // size-edit menu). The /display projector view stays read-only.
+        isDisplay={showToolbar}
         myUserId={myUserId}
         onRemoveToken={removeToken}
         onPositionUpdate={updateTokenPosition}
@@ -464,7 +524,30 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
           }}
         />
       )}
-      {/* Preview square while drawing */}
+      {/* Spawn area overlay (dashboard only). Players don't see this; it's an
+          editor affordance so the GM knows where new tokens will land. */}
+      {showToolbar && spawnArea && imageBounds && coordinateMapper.isReady && (() => {
+        const tl = coordinateMapper.imageRelativeToScreen({ x: spawnArea.x, y: spawnArea.y });
+        const br = coordinateMapper.imageRelativeToScreen({
+          x: spawnArea.x + spawnArea.width,
+          y: spawnArea.y + spawnArea.height,
+        });
+        if (!tl || !br) return null;
+        return (
+          <div
+            className="fixed border-2 border-emerald-400/70 border-dashed pointer-events-none z-[6]"
+            style={{
+              left: `${tl.x}px`,
+              top: `${tl.y}px`,
+              width: `${br.x - tl.x}px`,
+              height: `${br.y - tl.y}px`,
+              backgroundColor: "rgba(52, 211, 153, 0.12)",
+            }}
+            title="Spawn area — players land here"
+          />
+        );
+      })()}
+      {/* Preview square while drawing (covers in blue, spawn area in green) */}
       {isDrawingSquare && squareStartPos && squareCurrentPos && imageBounds && coordinateMapper.isReady && (
         (() => {
           const startScreen = coordinateMapper.imageRelativeToScreen(squareStartPos);
@@ -475,16 +558,21 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
           const top = Math.min(startScreen.y, currentScreen.y);
           const width = Math.abs(currentScreen.x - startScreen.x);
           const height = Math.abs(currentScreen.y - startScreen.y);
+          const previewColor = isSpawnToolActive
+            ? { border: "border-emerald-300", bg: "rgba(52, 211, 153, 0.25)" }
+            : isFogToolActive
+            ? { border: "border-purple-300", bg: "rgba(168, 85, 247, 0.25)" }
+            : { border: "border-blue-400", bg: "rgba(59, 130, 246, 0.2)" };
 
           return (
             <div
-              className="fixed border-2 border-blue-400 border-dashed shadow-lg z-30 pointer-events-none opacity-70"
+              className={`fixed border-2 border-dashed shadow-lg z-30 pointer-events-none opacity-80 ${previewColor.border}`}
               style={{
                 left: `${left}px`,
                 top: `${top}px`,
                 width: `${width}px`,
                 height: `${height}px`,
-                backgroundColor: "rgba(59, 130, 246, 0.2)",
+                backgroundColor: previewColor.bg,
               }}
             />
           );

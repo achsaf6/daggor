@@ -1,10 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { readFileSync } from 'fs';
 import { DEFAULT_BATTLEMAP_MAP_PATH } from '../../../lib/defaultBattlemap';
 
 export const runtime = "nodejs";
+
+// Cap remote image fetches so a malicious URL cannot OOM the server by serving
+// gigabytes of bytes. 20 MiB is generous for a battlemap image but bounded.
+const MAX_REMOTE_IMAGE_BYTES = 20 * 1024 * 1024;
+
+async function fetchRemoteImageBuffer(url: string): Promise<Buffer> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch remote map image (${response.status})`);
+  }
+
+  const contentLengthHeader = response.headers.get('content-length');
+  if (contentLengthHeader) {
+    const declared = Number(contentLengthHeader);
+    if (Number.isFinite(declared) && declared > MAX_REMOTE_IMAGE_BYTES) {
+      throw new Error('Remote image exceeds maximum allowed size');
+    }
+  }
+
+  if (!response.body) {
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > MAX_REMOTE_IMAGE_BYTES) {
+      throw new Error('Remote image exceeds maximum allowed size');
+    }
+    return Buffer.from(arrayBuffer);
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    totalBytes += value.byteLength;
+    if (totalBytes > MAX_REMOTE_IMAGE_BYTES) {
+      try {
+        await reader.cancel();
+      } catch {
+        // Ignore cancellation errors — we are bailing out anyway.
+      }
+      throw new Error('Remote image exceeds maximum allowed size');
+    }
+    chunks.push(value);
+  }
+
+  return Buffer.concat(chunks.map((c) => Buffer.from(c)));
+}
 
 interface GridData {
   verticalLines: number[];
@@ -254,20 +302,21 @@ export async function GET(request: NextRequest) {
     const requestedPath = searchParams.get('path');
 
     let imageBuffer: Buffer;
-    if (requestedPath && requestedPath.startsWith('http')) {
-      const response = await fetch(requestedPath);
-      if (!response.ok) {
-        throw new Error('Failed to fetch remote map image');
-      }
-      const arrayBuffer = await response.arrayBuffer();
-      imageBuffer = Buffer.from(arrayBuffer);
+    if (requestedPath && /^https?:\/\//i.test(requestedPath)) {
+      imageBuffer = await fetchRemoteImageBuffer(requestedPath);
     } else {
       const defaultPath = DEFAULT_BATTLEMAP_MAP_PATH.replace(/^\/+/, '');
       const relativePath =
         requestedPath && requestedPath.trim().length > 0
           ? requestedPath.replace(/^\/+/, '')
           : defaultPath;
-      const imagePath = join(process.cwd(), 'public', relativePath);
+      // Resolve and verify the final path stays within /public so a crafted
+      // ../../../etc/passwd cannot escape the asset directory.
+      const publicRoot = resolve(join(process.cwd(), 'public'));
+      const imagePath = resolve(join(publicRoot, relativePath));
+      if (imagePath !== publicRoot && !imagePath.startsWith(publicRoot + '/')) {
+        return NextResponse.json(defaultGridData, { status: 400 });
+      }
       imageBuffer = readFileSync(imagePath);
     }
 

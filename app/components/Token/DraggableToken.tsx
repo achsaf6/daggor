@@ -72,18 +72,9 @@ export const DraggableToken = ({
   onSizeChange,
   allowSizeEditing,
 }: DraggableTokenProps) => {
-  // Debug: log when onImageUpload prop changes
-  useEffect(() => {
-    console.log(`DraggableToken ${tokenId}: onImageUpload prop:`, !!onImageUpload, typeof onImageUpload);
-  }, [tokenId, onImageUpload]);
-  
-  // Use a ref to always get the latest onImageUpload value
+  // Use a ref to always get the latest onImageUpload value, avoiding stale closures.
   const onImageUploadRef = useRef(onImageUpload);
-  // Update ref immediately on every render, not just in useEffect
   onImageUploadRef.current = onImageUpload;
-  useEffect(() => {
-    console.log(`DraggableToken ${tokenId}: onImageUpload prop changed:`, !!onImageUpload, typeof onImageUpload);
-  }, [tokenId, onImageUpload]);
   
   // Track initial mouse position to distinguish clicks from drags
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -354,35 +345,22 @@ export const DraggableToken = ({
     [onSizeChange, tokenId]
   );
 
-  // Use ref to always get latest onImageUpload value, avoiding stale closures
   const handleImageUpload = useCallback(async (file: File) => {
-    // Use ref to get the latest value in case prop changes
     const currentOnImageUpload = onImageUploadRef.current;
-    console.log("handleImageUpload called with:", { 
-      tokenId, 
-      file: file.name, 
-      onImageUpload: !!currentOnImageUpload,
-      onImageUploadType: typeof currentOnImageUpload,
-      onImageUploadProp: !!onImageUpload
-    });
     if (!currentOnImageUpload) {
-      console.warn("onImageUpload is not defined for token:", tokenId);
       return null;
     }
     setIsUploading(true);
-    setIsMenuOpen(false); // Close the dropdown when upload starts
+    setIsMenuOpen(false);
     try {
-      console.log("Calling onImageUpload prop with tokenId and file");
       const imageUrl = await currentOnImageUpload(tokenId, file);
-      console.log("onImageUpload completed successfully", imageUrl);
       return imageUrl ?? null;
     } catch (error) {
       console.error("Failed to upload token image:", error);
-      throw error; // Re-throw so TokenActionsMenu can handle it
+      throw error;
     } finally {
       setIsUploading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenId]);
 
   useEffect(() => {

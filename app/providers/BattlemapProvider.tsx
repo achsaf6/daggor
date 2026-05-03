@@ -11,12 +11,10 @@ import React, {
 } from "react";
 import { io, Socket } from "socket.io-client";
 import { useViewMode } from "../hooks/useViewMode";
+import { isDmSurface, useSurface } from "../hooks/useSurface";
 import { GridData, sanitizeGridData } from "../utils/gridData";
-import { Cover } from "../types";
 
-const COVER_DEFAULT_COLOR = "#808080";
 const clampValue = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-const generateCoverId = () => `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
 const DEFAULT_SETTINGS = {
   gridScale: 1,
@@ -42,6 +40,21 @@ interface BattlemapSettings {
   gridOffsetY: number;
 }
 
+export interface SpawnArea {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface FogShape {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface BattlemapData extends BattlemapSettings {
   id: string;
   name: string;
@@ -49,7 +62,8 @@ interface BattlemapData extends BattlemapSettings {
   images: BattlemapImageSummary[];
   activeImageId: string | null;
   gridData: GridData;
-  covers: Cover[];
+  spawnArea: SpawnArea;
+  fogShapes: FogShape[];
 }
 
 interface CreateBattlemapInput {
@@ -78,10 +92,12 @@ interface BattlemapContextValue {
   createBattlemap: (input: CreateBattlemapInput) => Promise<BattlemapSummary | null>;
   syncBattlemapFromServer: (battlemapId: string | null) => void;
   deleteBattlemap: (battlemapId: string) => Promise<void>;
-  addCover: (cover: Omit<Cover, "id"> & { id?: string }) => Promise<Cover | null>;
-  updateCover: (id: string, updates: Partial<Cover>) => Promise<void>;
-  removeCover: (id: string) => Promise<void>;
   reorderBattlemaps: (orderedIds: string[]) => Promise<void>;
+  updateSpawnArea: (spawnArea: SpawnArea) => Promise<void>;
+  addFogArea: (shape: Omit<FogShape, "id">) => Promise<void>;
+  removeFogArea: (id: string) => Promise<void>;
+  updateFogArea: (id: string, updates: Partial<Omit<FogShape, "id">>) => Promise<void>;
+  clearFog: () => Promise<void>;
   canManageBattlemaps: boolean;
 }
 
@@ -95,8 +111,22 @@ interface BattlemapPayload {
   gridOffsetX?: number | null;
   gridOffsetY?: number | null;
   gridData?: GridData | null;
-  covers?: Partial<Cover>[] | null;
+  spawnArea?: Partial<SpawnArea> | null;
+  fogShapes?: Partial<FogShape>[] | null;
 }
+
+const DEFAULT_SPAWN_AREA: SpawnArea = { x: 40, y: 40, width: 20, height: 20 };
+const sanitizeSpawnArea = (input: Partial<SpawnArea> | null | undefined): SpawnArea => {
+  if (!input || typeof input !== "object") return { ...DEFAULT_SPAWN_AREA };
+  const width = clampValue(typeof input.width === "number" ? input.width : DEFAULT_SPAWN_AREA.width, 1, 100);
+  const height = clampValue(typeof input.height === "number" ? input.height : DEFAULT_SPAWN_AREA.height, 1, 100);
+  return {
+    x: clampValue(typeof input.x === "number" ? input.x : DEFAULT_SPAWN_AREA.x, 0, 100 - width),
+    y: clampValue(typeof input.y === "number" ? input.y : DEFAULT_SPAWN_AREA.y, 0, 100 - height),
+    width,
+    height,
+  };
+};
 
 const BattlemapContext = createContext<BattlemapContextValue | undefined>(undefined);
 
@@ -127,42 +157,6 @@ const getPersistentUserId = () => {
   return newId;
 };
 
-const parseCover = (input: Partial<Cover> | null | undefined): Cover | null => {
-  if (!input || typeof input !== "object" || typeof input.id !== "string") {
-    return null;
-  }
-
-  const { id, x, y, width, height, color } = input as Cover;
-
-  return {
-    id,
-    x: typeof x === "number" ? x : 0,
-    y: typeof y === "number" ? y : 0,
-    width: typeof width === "number" ? width : 0,
-    height: typeof height === "number" ? height : 0,
-    color: typeof color === "string" ? color : COVER_DEFAULT_COLOR,
-  };
-};
-
-const sanitizeCoverInput = (input: Partial<Cover> & { id: string }): Cover => {
-  const width = clampValue(typeof input.width === "number" ? input.width : 0, 0, 100);
-  const height = clampValue(typeof input.height === "number" ? input.height : 0, 0, 100);
-  const maxX = 100 - width;
-  const maxY = 100 - height;
-
-  return {
-    id: input.id,
-    width,
-    height,
-    x: clampValue(typeof input.x === "number" ? input.x : 0, 0, maxX),
-    y: clampValue(typeof input.y === "number" ? input.y : 0, 0, maxY),
-    color:
-      typeof input.color === "string" && input.color.trim() !== ""
-        ? input.color
-        : COVER_DEFAULT_COLOR,
-  };
-};
-
 const hasBattlemapPayload = (value: unknown): value is { battlemap?: BattlemapPayload | null } =>
   typeof value === "object" && value !== null && "battlemap" in value;
 
@@ -176,9 +170,6 @@ const extractBattlemapId = (value: unknown): string | null => {
 
 const normalizeBattlemapPayload = (payload: BattlemapPayload): BattlemapData => {
   const gridData = sanitizeGridData(payload.gridData);
-  const covers: Cover[] = Array.isArray(payload.covers)
-    ? payload.covers.map(parseCover).filter((cover): cover is Cover => cover !== null)
-    : [];
 
   const images: BattlemapImageSummary[] = Array.isArray(payload.images)
     ? payload.images
@@ -214,13 +205,30 @@ const normalizeBattlemapPayload = (payload: BattlemapPayload): BattlemapData => 
         ? payload.gridOffsetY
         : DEFAULT_SETTINGS.gridOffsetY,
     gridData,
-    covers,
+    spawnArea: sanitizeSpawnArea(payload.spawnArea),
+    fogShapes: Array.isArray(payload.fogShapes)
+      ? payload.fogShapes
+          .map((s): FogShape | null => {
+            if (!s || typeof s !== "object" || typeof s.id !== "string") return null;
+            const x = typeof s.x === "number" ? s.x : 0;
+            const y = typeof s.y === "number" ? s.y : 0;
+            const width = typeof s.width === "number" ? s.width : 0;
+            const height = typeof s.height === "number" ? s.height : 0;
+            if (width <= 0 || height <= 0) return null;
+            return { id: s.id, x, y, width, height };
+          })
+          .filter((s): s is FogShape => s !== null)
+      : [],
   };
 };
 
 export const BattlemapProvider = ({ children }: { children: React.ReactNode }) => {
-  const { isDisplay, isMounted } = useViewMode();
-  const allowBattlemapMutations = isDisplay;
+  const { isMounted } = useViewMode();
+  const surface = useSurface();
+  // Both /dashboard and /display run on the DM's machine; only the dashboard
+  // actually exposes mutation UI, but we trust either to send mutations.
+  const isDisplay = isDmSurface(surface);
+  const allowBattlemapMutations = surface === "dashboard";
   const [battlemaps, setBattlemaps] = useState<BattlemapSummary[]>([]);
   const [currentBattlemapId, setCurrentBattlemapId] = useState<string | null>(null);
   const [currentBattlemap, setCurrentBattlemap] = useState<BattlemapData | null>(null);
@@ -339,9 +347,10 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
 
     const identificationPayload = {
       persistentUserId: persistentUserIdRef.current,
+      surface,
       isDisplay,
       suppressPresence: true,
-      allowBattlemapMutations: isDisplay,
+      allowBattlemapMutations,
     };
     socket.on("connect", () => {
       socket.emit("user-identify", identificationPayload);
@@ -397,7 +406,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [isMounted, isDisplay]);
+  }, [isMounted, isDisplay, surface, allowBattlemapMutations]);
 
   const requestBattlemap = useCallback(
     async (battlemapId: string) => {
@@ -685,6 +694,81 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
     [currentBattlemapId, clearDebounceTimer, emitWithAck]
   );
 
+  const addFogArea = useCallback(
+    async (shape: Omit<FogShape, "id">) => {
+      if (!allowBattlemapMutations) return;
+      try {
+        await emitWithAck("fog:add-area", { shape });
+      } catch (fogError) {
+        console.error("Failed to add fog area", fogError);
+      }
+    },
+    [allowBattlemapMutations, emitWithAck]
+  );
+
+  const removeFogArea = useCallback(
+    async (id: string) => {
+      if (!allowBattlemapMutations) return;
+      try {
+        await emitWithAck("fog:remove-area", { id });
+      } catch (fogError) {
+        console.error("Failed to remove fog area", fogError);
+      }
+    },
+    [allowBattlemapMutations, emitWithAck]
+  );
+
+  const updateFogArea = useCallback(
+    async (id: string, updates: Partial<Omit<FogShape, "id">>) => {
+      if (!allowBattlemapMutations) return;
+      // Optimistic update so dragging feels responsive — server will
+      // confirm via battlemap:updated.
+      setCurrentBattlemap((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          fogShapes: prev.fogShapes.map((s) =>
+            s.id === id ? { ...s, ...updates } : s
+          ),
+        };
+      });
+      try {
+        await emitWithAck("fog:update-area", { id, updates });
+      } catch (fogError) {
+        console.error("Failed to update fog area", fogError);
+      }
+    },
+    [allowBattlemapMutations, emitWithAck]
+  );
+
+  const clearFog = useCallback(async () => {
+    if (!allowBattlemapMutations) return;
+    try {
+      await emitWithAck("fog:clear", {});
+    } catch (fogError) {
+      console.error("Failed to clear fog", fogError);
+    }
+  }, [allowBattlemapMutations, emitWithAck]);
+
+  const updateSpawnArea = useCallback(
+    async (spawnArea: SpawnArea) => {
+      if (!currentBattlemapId || !allowBattlemapMutations) return;
+      const sanitized = sanitizeSpawnArea(spawnArea);
+      // Optimistic update so the rectangle redraws instantly.
+      setCurrentBattlemap((prev) => (prev ? { ...prev, spawnArea: sanitized } : prev));
+      try {
+        await emitWithAck("battlemap:update-spawn-area", {
+          battlemapId: currentBattlemapId,
+          spawnArea: sanitized,
+        });
+      } catch (spawnError) {
+        console.error("Failed to update spawn area", spawnError);
+        setError("Failed to update spawn area");
+      }
+    },
+    [allowBattlemapMutations, currentBattlemapId, emitWithAck]
+  );
+
   const createBattlemap = useCallback(
     async ({ name, mapPath }: CreateBattlemapInput) => {
       debugLog("createBattlemap", name, mapPath);
@@ -753,114 +837,6 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
     [currentBattlemapId, emitWithAck]
   );
 
-  const addCover = useCallback(
-    async (coverInput: Omit<Cover, "id"> & { id?: string }) => {
-      if (!currentBattlemapId || !currentBattlemap) {
-        return null;
-      }
-
-      debugLog("addCover", currentBattlemapId, coverInput);
-      const coverId =
-        typeof coverInput.id === "string" && coverInput.id.trim() !== ""
-          ? coverInput.id
-          : generateCoverId();
-      const sanitized = sanitizeCoverInput({ ...coverInput, id: coverId });
-
-      setCurrentBattlemap((prev) =>
-        prev
-          ? {
-              ...prev,
-              covers: [...prev.covers.filter((cover) => cover.id !== sanitized.id), sanitized],
-            }
-          : prev
-      );
-
-      try {
-        await emitWithAck("battlemap:add-cover", {
-          battlemapId: currentBattlemapId,
-          battlemapImageId: currentBattlemap.activeImageId ?? null,
-          cover: sanitized,
-        });
-        return sanitized;
-      } catch (insertError) {
-        console.error("Failed to add cover", insertError);
-        setError("Failed to add cover");
-        await refreshBattlemap();
-        return null;
-      }
-    },
-    [currentBattlemap, currentBattlemapId, emitWithAck, refreshBattlemap]
-  );
-
-  const updateCover = useCallback(
-    async (id: string, updates: Partial<Cover>) => {
-      if (!currentBattlemapId) {
-        return;
-      }
-
-      debugLog("updateCover", id, updates);
-      setCurrentBattlemap((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        const existing = prev.covers.find((cover) => cover.id === id);
-        if (!existing) {
-          return prev;
-        }
-        const sanitized = sanitizeCoverInput({ ...existing, ...updates, id });
-        return {
-          ...prev,
-          covers: prev.covers.map((cover) => (cover.id === id ? sanitized : cover)),
-        };
-      });
-
-      try {
-        await emitWithAck("battlemap:update-cover", {
-          battlemapId: currentBattlemapId,
-          battlemapImageId: currentBattlemap?.activeImageId ?? null,
-          coverId: id,
-          updates,
-        });
-      } catch (updateError) {
-        console.error("Failed to update cover", updateError);
-        setError("Failed to update cover");
-        await refreshBattlemap();
-      }
-    },
-    [currentBattlemap?.activeImageId, currentBattlemapId, emitWithAck, refreshBattlemap]
-  );
-
-  const removeCover = useCallback(
-    async (id: string) => {
-      if (!currentBattlemapId) {
-        return;
-      }
-
-      debugLog("removeCover", id);
-      setCurrentBattlemap((prev) =>
-        prev
-          ? {
-              ...prev,
-              covers: prev.covers.filter((cover) => cover.id !== id),
-            }
-          : prev
-      );
-
-      try {
-        await emitWithAck("battlemap:remove-cover", {
-          battlemapId: currentBattlemapId,
-          battlemapImageId: currentBattlemap?.activeImageId ?? null,
-          coverId: id,
-        });
-      } catch (deleteError) {
-        console.error("Failed to remove cover", deleteError);
-        setError("Failed to remove cover");
-        await refreshBattlemap();
-      }
-    },
-    [currentBattlemap?.activeImageId, currentBattlemapId, emitWithAck, refreshBattlemap]
-  );
-
   const value = useMemo<BattlemapContextValue>(
     () => ({
       battlemaps,
@@ -883,10 +859,12 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       createBattlemap,
       syncBattlemapFromServer,
       deleteBattlemap,
-      addCover,
-      updateCover,
-      removeCover,
       reorderBattlemaps,
+      updateSpawnArea,
+      addFogArea,
+      removeFogArea,
+      updateFogArea,
+      clearFog,
       canManageBattlemaps: allowBattlemapMutations,
     }),
     [
@@ -910,10 +888,12 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       createBattlemap,
       syncBattlemapFromServer,
       deleteBattlemap,
-      addCover,
-      updateCover,
-      removeCover,
       reorderBattlemaps,
+      updateSpawnArea,
+      addFogArea,
+      removeFogArea,
+      updateFogArea,
+      clearFog,
       allowBattlemapMutations,
     ]
   );

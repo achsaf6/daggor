@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Circle } from "lucide-react";
 import { supabase } from "@/app/utils/supabase";
 import { TokenSize, TokenTemplate } from "@/app/types";
 import {
@@ -333,30 +334,26 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
           e.stopPropagation();
           setIsOpen((prev) => !prev);
         }}
-        className={`relative rounded-md p-3 text-white hover:bg-black/90 transition-all ${
-          isOpen ? "bg-black/90" : ""
+        className={`relative rounded-sm p-3 transition-colors ${
+          isOpen
+            ? "bg-[rgba(201,162,74,0.25)] text-[var(--brass-shadow)]"
+            : "text-[var(--brass-deep)] hover:text-[var(--brass-shadow)] hover:bg-[rgba(201,162,74,0.18)]"
         }`}
         aria-label="Add Token"
       >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          className="h-6 w-6"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <circle cx="12" cy="12" r="10" />
-        </svg>
-        <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-white/60" />
+        <Circle className="h-6 w-6" strokeWidth={2} />
+        <div className="absolute bottom-1 right-1 w-0 h-0 border-l-[5px] border-l-transparent border-b-[5px] border-b-[var(--brass-deep)]" />
       </button>
 
       {isOpen && (
-        <div className="absolute left-full ml-2 top-0 bg-black/85 backdrop-blur-md rounded-lg p-4 shadow-lg border border-white/20 min-w-[220px] z-20">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-white text-sm font-semibold">Token Catalog</h3>
-            {isLoadingTemplates && <span className="text-xs text-gray-300">Loading…</span>}
+        <div className="parchment-panel absolute left-full ml-2 top-0 border border-[var(--brass-deep)] p-4 shadow-lg min-w-[240px] z-20">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="parchment-heading text-sm">Token Catalog</h3>
+            {isLoadingTemplates && (
+              <span className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>Loading…</span>
+            )}
           </div>
+          <div className="parchment-rule mb-3" />
           <div className="grid grid-cols-4 gap-2">
             {AVAILABLE_COLORS.map((color) => {
               const template = getTemplateForColor(color.value);
@@ -373,20 +370,33 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
                   onMouseLeave={cancelLongPress}
                   onTouchStart={() => startLongPress(color.value)}
                   onTouchEnd={cancelLongPress}
-                  className="relative w-10 h-10 rounded-full border-2 border-white shadow-md hover:scale-110 transition-transform cursor-grab active:cursor-grabbing overflow-hidden"
+                  className="relative w-10 h-10 rounded-full hover:scale-110 transition-transform cursor-grab active:cursor-grabbing overflow-hidden"
                   style={
                     template.imageUrl
                       ? {
                           backgroundImage: `url(${template.imageUrl})`,
                           backgroundSize: "cover",
                           backgroundPosition: "center",
+                          boxShadow: "0 0 0 1.5px var(--parchment-bright), 0 0 0 2.5px var(--brass-deep)",
                         }
-                      : { backgroundColor: color.value }
+                      : {
+                          backgroundColor: color.value,
+                          boxShadow: "0 0 0 1.5px var(--parchment-bright), 0 0 0 2.5px var(--brass-deep)",
+                        }
                   }
                   title={`Drag ${template.name ?? color.name} token (${sizeMeta.label})`}
                   aria-label={`Drag ${template.name ?? color.name} token (${sizeMeta.label})`}
+                  data-token-color={color.value}
                 >
-                  <span className="absolute bottom-0 right-0 mb-0.5 mr-0.5 rounded bg-black/70 px-1 text-[8px] font-semibold uppercase text-white">
+                  <span
+                    className="parchment-numeric absolute bottom-0 right-0 mb-0.5 mr-0.5 border px-1"
+                    style={{
+                      fontSize: "0.55rem",
+                      color: "var(--parchment-ink)",
+                      borderColor: "var(--brass-deep)",
+                      background: "var(--parchment-bright)",
+                    }}
+                  >
                     {TOKEN_SIZE_METADATA[template.size].label.charAt(0)}
                   </span>
                 </button>
@@ -397,17 +407,21 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
       )}
 
       {editorState && (
-        <div className="absolute left-full ml-3 top-0 z-30 w-64 rounded-lg border border-white/15 bg-slate-950/95 p-4 text-sm text-white shadow-2xl backdrop-blur">
-          <div className="flex items-center justify-between mb-3">
+        <div
+          className="parchment-panel absolute left-full ml-3 top-0 z-30 w-72 border border-[var(--brass-deep)] p-4 text-sm shadow-2xl"
+          style={{ color: "var(--parchment-ink)" }}
+        >
+          <div className="flex items-center justify-between mb-1">
             <div>
-              <p className="text-xs uppercase tracking-wide text-gray-300">Customize Token</p>
-              <p className="text-base font-semibold" style={{ color: editorState.color }}>
+              <p className="parchment-heading text-xs">Customize Token</p>
+              <p className="parchment-body text-base font-semibold mt-1" style={{ color: editorState.color }}>
                 {AVAILABLE_COLORS.find((c) => c.value === editorState.color)?.name ?? editorState.color}
               </p>
             </div>
             <button
               type="button"
-              className="text-gray-300 hover:text-white"
+              className="parchment-numeric transition-colors hover:text-[var(--brass-shadow)]"
+              style={{ color: "var(--brass-deep)" }}
               aria-label="Close editor"
               onClick={() => {
                 setEditorState(null);
@@ -419,8 +433,9 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
               ✕
             </button>
           </div>
+          <div className="parchment-rule mb-3" />
           <div className="flex flex-col gap-2 mb-3">
-            <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-300">
+            <label className="parchment-numeric text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
               Token Name
             </label>
             <input
@@ -434,19 +449,23 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
                   void commitNameChange();
                 }
               }}
-              className="w-full rounded-md border border-gray-700 bg-gray-900 px-2 py-1 text-sm text-gray-100 placeholder-gray-500 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+              className="parchment-body w-full border px-2 py-1.5 text-sm focus:outline-none"
+              style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
               placeholder={getDefaultTokenName(editorState.color)}
             />
           </div>
           <div className="flex items-center gap-3 mb-3">
             <div
-              className="h-12 w-12 rounded-full border border-white/40 shadow-inner"
-              style={editorPreviewBackground}
+              className="h-12 w-12 rounded-full"
+              style={{
+                ...editorPreviewBackground,
+                boxShadow: "0 0 0 1.5px var(--parchment-bright), 0 0 0 2.5px var(--brass-deep)",
+              }}
             />
-            <div className="flex flex-col text-xs text-gray-300">
-              <span>DnD Size</span>
-              <span className="font-semibold text-white">{TOKEN_SIZE_METADATA[editorState.size].label}</span>
-              <span>{TOKEN_SIZE_METADATA[editorState.size].description}</span>
+            <div className="flex flex-col text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+              <span className="parchment-numeric" style={{ fontSize: "0.65rem" }}>DnD Size</span>
+              <span className="parchment-body font-semibold text-sm" style={{ color: "var(--parchment-ink)" }}>{TOKEN_SIZE_METADATA[editorState.size].label}</span>
+              <span className="parchment-flavor" style={{ fontSize: "0.7rem" }}>{TOKEN_SIZE_METADATA[editorState.size].description}</span>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-1.5 mb-3">
@@ -457,11 +476,12 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
                 <button
                   key={size}
                   type="button"
-                  className={`rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${
-                    isSelected
-                      ? "border-emerald-400 bg-emerald-500/20 text-white"
-                      : "border-gray-700 bg-gray-900/50 text-gray-200 hover:border-gray-500"
-                  }`}
+                  className="parchment-numeric border px-2 py-1 text-xs transition-colors"
+                  style={{
+                    color: isSelected ? "var(--parchment-bright)" : "var(--brass-shadow)",
+                    borderColor: isSelected ? "var(--brass-shadow)" : "var(--brass-deep)",
+                    background: isSelected ? "var(--brass-deep)" : "rgba(255, 252, 240, 0.4)",
+                  }}
                   onClick={() => void handleSizeChange(size)}
                   disabled={isSaving && isSelected}
                 >
@@ -471,7 +491,7 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
             })}
           </div>
           <div className="mb-2">
-            <p className="text-xs uppercase tracking-wide text-gray-300 mb-1">Token Art</p>
+            <p className="parchment-numeric text-xs mb-1.5" style={{ color: "var(--parchment-ink-muted)" }}>Token Art</p>
             <input
               ref={fileInputRef}
               type="file"
@@ -482,7 +502,8 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
             <div className="flex gap-2">
               <button
                 type="button"
-                className="flex-1 rounded-md border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-100 hover:border-gray-400 disabled:opacity-60"
+                className="parchment-numeric flex-1 border px-2 py-1 text-xs transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-60"
+                style={{ color: "var(--parchment-bright)", borderColor: "var(--brass-shadow)", background: "var(--brass-deep)" }}
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
               >
@@ -490,7 +511,8 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
               </button>
               <button
                 type="button"
-                className="rounded-md border border-gray-600 bg-transparent px-2 py-1 text-xs text-gray-200 hover:text-white disabled:opacity-50"
+                className="parchment-numeric border px-2 py-1 text-xs transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-50"
+                style={{ color: "var(--brass-deep)", borderColor: "var(--brass-deep)", background: "transparent" }}
                 onClick={() => void handleImageRemove()}
                 disabled={!editorState.imageUrl || isSaving || isUploading}
               >
@@ -498,11 +520,11 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
               </button>
             </div>
             {editorState.imageUrl && (
-              <p className="mt-1 text-[11px] text-gray-400 break-all">{editorState.imageUrl}</p>
+              <p className="parchment-flavor mt-1 break-all" style={{ fontSize: "0.7rem", color: "var(--parchment-ink-muted)" }}>{editorState.imageUrl}</p>
             )}
           </div>
-          {editorStatus && <p className="text-[11px] text-emerald-300">{editorStatus}</p>}
-          {editorError && <p className="text-[11px] text-red-300">{editorError}</p>}
+          {editorStatus && <p className="parchment-flavor" style={{ fontSize: "0.7rem", color: "#3a6a3a" }}>{editorStatus}</p>}
+          {editorError && <p className="parchment-flavor" style={{ fontSize: "0.7rem", color: "#7a2424" }}>{editorError}</p>}
         </div>
       )}
     </div>

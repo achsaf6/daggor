@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { memo, useMemo } from "react";
 import { DEFAULT_BATTLEMAP_MAP_PATH } from "../../../lib/defaultBattlemap";
 
 interface MapImageProps {
@@ -9,17 +10,30 @@ interface MapImageProps {
   src?: string | null;
 }
 
-export const MapImage = ({
+const IDENTITY_STYLE: React.CSSProperties = {
+  opacity: 1,
+  transformOrigin: "center center",
+};
+
+const MapImageInner = ({
   onLoad,
   scale = 1,
   translateX = 0,
   translateY = 0,
   src,
 }: MapImageProps) => {
-  const transform =
-    scale !== 1 || translateX !== 0 || translateY !== 0
-      ? `scale(${scale}) translate(${translateX}px, ${translateY}px)`
-      : undefined;
+  const isIdentity = scale === 1 && translateX === 0 && translateY === 0;
+
+  const style = useMemo<React.CSSProperties>(() => {
+    if (isIdentity) {
+      return IDENTITY_STYLE;
+    }
+    return {
+      opacity: 1,
+      transform: `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
+      transformOrigin: "center center",
+    };
+  }, [isIdentity, scale, translateX, translateY]);
 
   const resolvedSrc =
     typeof src === "string" && src.trim().length > 0 ? src : DEFAULT_BATTLEMAP_MAP_PATH;
@@ -31,15 +45,14 @@ export const MapImage = ({
       fill
       unoptimized
       className="object-contain pointer-events-none"
-      style={{
-        opacity: 1,
-        transform,
-        transformOrigin: "center center",
-      }}
+      style={style}
       priority
       onLoad={onLoad}
       draggable={false}
     />
   );
 };
+
+export const MapImage = memo(MapImageInner);
+MapImage.displayName = "MapImage";
 

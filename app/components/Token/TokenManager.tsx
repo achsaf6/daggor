@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { User, ImageBounds, Position, TokenSize } from "../../types";
 import { DraggableToken } from "./DraggableToken";
 
@@ -54,11 +53,6 @@ export const TokenManager = ({
   onDragStateChange,
   onSizeChange,
 }: TokenManagerProps) => {
-  // Debug: log onImageUpload prop (must be before early return)
-  useEffect(() => {
-    console.log("TokenManager: onImageUpload prop:", !!onImageUpload, typeof onImageUpload);
-  }, [onImageUpload]);
-  
   if (!imageBounds) return null;
 
 

@@ -53,7 +53,6 @@ const MapBadgeIcon = () => (
     strokeWidth="1.5"
     strokeLinecap="round"
     strokeLinejoin="round"
-    className="text-white/80"
     aria-hidden="true"
   >
     <path d="M3 7l6-3 6 3 6-3v13l-6 3-6-3-6 3z" />
@@ -292,42 +291,52 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
 
   return (
     <div
-      className="text-white text-sm space-y-4 overflow-y-auto max-h-[70vh] pr-2"
+      className="parchment-body text-sm space-y-4 overflow-y-auto max-h-[70vh] pr-2"
+      style={{ color: "var(--parchment-ink)" }}
       onClick={(event) => event.stopPropagation()}
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-white/80">
-          Battlemap Manager
-        </h3>
+        <h3 className="parchment-heading text-sm">Battlemap Manager</h3>
         {onClose && (
           <button
             type="button"
             onClick={onClose}
-            className="text-white/60 hover:text-white"
+            className="parchment-numeric transition-colors hover:text-[var(--brass-shadow)]"
+            style={{ color: "var(--brass-deep)" }}
             aria-label="Close battlemap manager"
           >
             ✕
           </button>
         )}
       </div>
+      <div className="parchment-rule -mt-2 mb-2" />
 
       {error ? (
-        <div className="rounded-md bg-red-500/20 border border-red-500/40 px-3 py-2 text-xs">
+        <div
+          className="parchment-flavor px-3 py-2 text-xs border"
+          style={{ color: "#7a2424", borderColor: "#7a2424", background: "rgba(166, 49, 49, 0.08)" }}
+        >
           {error}
         </div>
       ) : null}
 
       <div className="space-y-2">
-        <label className="block text-xs uppercase tracking-wide text-white/60">
+        <label className="parchment-numeric block text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
           Active Battlemaps
         </label>
 
         {isListLoading ? (
-          <div className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white/70">
+          <div
+            className="parchment-flavor w-full px-3 py-3 text-sm border"
+            style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+          >
             Loading battlemaps…
           </div>
         ) : availableBattlemaps.length === 0 ? (
-          <div className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white/60">
+          <div
+            className="parchment-flavor w-full px-3 py-3 text-sm border"
+            style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+          >
             No battlemaps available yet.
           </div>
         ) : (
@@ -356,16 +365,18 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
           </DndContext>
         )}
         {!canManageBattlemaps ? (
-          <p className="text-xs text-white/40">
+          <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
             Only the display host can reorder battlemaps.
           </p>
         ) : dragEnabled ? (
-          <p className="text-xs text-white/40">Drag the handle beside a map to change its order.</p>
+          <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+            Drag the handle beside a map to change its order.
+          </p>
         ) : null}
       </div>
 
       <div className="space-y-2">
-        <label className="block text-xs uppercase tracking-wide text-white/60">
+        <label className="parchment-numeric block text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
           Battlemap Name
         </label>
         <input
@@ -374,54 +385,66 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
           onChange={(event) => setNameValue(event.target.value)}
           onBlur={handleNameSave}
           disabled={!currentBattlemap || disabled}
-          className="w-full bg-black/40 border border-white/20 rounded-md px-2 py-2 text-white focus:outline-none focus:ring-1 focus:ring-white/40 disabled:opacity-50"
+          className="parchment-body w-full border px-2 py-2 focus:outline-none disabled:opacity-50"
+          style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
           placeholder="Enter a name"
         />
-        <p className="text-xs text-white/40">
+        <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
           Changes are saved automatically when the field loses focus.
         </p>
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="block text-xs uppercase tracking-wide text-white/60">Floors</label>
+          <label className="parchment-numeric block text-xs" style={{ color: "var(--parchment-ink-muted)" }}>Floors</label>
           <button
             type="button"
             onClick={handleAddFloor}
             disabled={!currentBattlemap || disabled || !canManageBattlemaps}
-            className="text-xs rounded-md border border-white/15 bg-white/5 px-2 py-1 text-white/80 hover:bg-white/10 disabled:opacity-50"
+            className="parchment-numeric text-xs border px-2 py-1 transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-50"
+            style={{ color: "var(--brass-shadow)", borderColor: "var(--brass-deep)", background: "rgba(255, 252, 240, 0.4)" }}
           >
             + Add Floor
           </button>
         </div>
 
         {!currentBattlemap ? (
-          <div className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white/60">
+          <div
+            className="parchment-flavor w-full px-3 py-3 text-sm border"
+            style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+          >
             Select a battlemap to manage floors.
           </div>
         ) : floors.length === 0 ? (
-          <div className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-3 text-sm text-white/60">
+          <div
+            className="parchment-flavor w-full px-3 py-3 text-sm border"
+            style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+          >
             No floors yet.
           </div>
         ) : (
           <>
             <div className="flex flex-wrap gap-2">
-              {floors.map((floor) => (
-                <button
-                  key={floor.id}
-                  type="button"
-                  onClick={() => handleFloorSelect(floor.id)}
-                  disabled={disabled || !canManageBattlemaps}
-                  className={`rounded-md border px-2 py-1 text-xs transition ${
-                    floor.id === activeFloorId
-                      ? "border-emerald-400 bg-emerald-500/15 text-emerald-100"
-                      : "border-white/15 bg-white/5 text-white/80 hover:bg-white/10"
-                  } disabled:opacity-50`}
-                  title={floor.name}
-                >
-                  {floor.name || "Floor"}
-                </button>
-              ))}
+              {floors.map((floor) => {
+                const isActive = floor.id === activeFloorId;
+                return (
+                  <button
+                    key={floor.id}
+                    type="button"
+                    onClick={() => handleFloorSelect(floor.id)}
+                    disabled={disabled || !canManageBattlemaps}
+                    className="parchment-numeric border px-2 py-1 text-xs transition-colors disabled:opacity-50"
+                    style={{
+                      color: isActive ? "var(--parchment-bright)" : "var(--brass-shadow)",
+                      borderColor: "var(--brass-deep)",
+                      background: isActive ? "var(--brass-deep)" : "rgba(255, 252, 240, 0.4)",
+                    }}
+                    title={floor.name}
+                  >
+                    {floor.name || "Floor"}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="flex items-center gap-2">
@@ -431,14 +454,16 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
                 onChange={(event) => setFloorNameValue(event.target.value)}
                 onBlur={handleFloorNameSave}
                 disabled={!activeFloorId || disabled || !canManageBattlemaps}
-                className="flex-1 bg-black/40 border border-white/20 rounded-md px-2 py-2 text-white focus:outline-none focus:ring-1 focus:ring-white/40 disabled:opacity-50"
+                className="parchment-body flex-1 border px-2 py-2 focus:outline-none disabled:opacity-50"
+                style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
                 placeholder="Floor name"
               />
               <button
                 type="button"
                 onClick={handleDeleteFloor}
                 disabled={!activeFloorId || floors.length <= 1 || disabled || !canManageBattlemaps}
-                className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-2 text-xs text-red-100 hover:bg-red-500/20 disabled:opacity-50"
+                className="parchment-numeric border px-2 py-2 text-xs transition-colors hover:bg-[rgba(166,49,49,0.18)] disabled:opacity-50"
+                style={{ color: "#7a2424", borderColor: "#7a2424", background: "rgba(166, 49, 49, 0.08)" }}
                 title={floors.length <= 1 ? "Cannot delete the last floor" : "Delete floor"}
               >
                 Delete
@@ -446,17 +471,20 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
             </div>
 
             {!canManageBattlemaps ? (
-              <p className="text-xs text-white/40">Only the display host can change floors.</p>
+              <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>Only the display host can change floors.</p>
             ) : null}
           </>
         )}
       </div>
 
       <div className="space-y-2">
-        <label className="block text-xs uppercase tracking-wide text-white/60">
+        <label className="parchment-numeric block text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
           Map Image
         </label>
-        <div className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-2 text-xs text-white/80 break-words min-h-[48px]">
+        <div
+          className="parchment-flavor w-full border px-2 py-2 text-xs break-words min-h-[48px]"
+          style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+        >
           {currentBattlemap?.mapPath ? currentBattlemap.mapPath : "No image uploaded yet."}
         </div>
         <div className="flex items-center gap-2">
@@ -472,29 +500,32 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
             type="button"
             onClick={handleUploadClick}
             disabled={!currentBattlemap || !activeFloorId || disabled || isUploading}
-            className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-md px-2 py-2 text-white text-sm font-medium transition disabled:opacity-50"
+            className="parchment-numeric flex-1 border px-3 py-2 text-sm transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-50"
+            style={{ color: "var(--parchment-bright)", borderColor: "var(--brass-shadow)", background: "var(--brass-deep)" }}
           >
             {isUploading ? "Uploading…" : currentBattlemap?.mapPath ? "Replace Image" : "Upload Image"}
           </button>
         </div>
-        <p className="text-xs text-white/40">
+        <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
           Drop in any image file—it&apos;s uploaded to Supabase storage and referenced automatically.
         </p>
       </div>
 
-      <form onSubmit={handleCreateBattlemap} className="space-y-2 border-t border-white/10 pt-3">
-        <h4 className="text-xs uppercase tracking-wide text-white/60">Create New Battlemap</h4>
+      <form onSubmit={handleCreateBattlemap} className="space-y-2 pt-3" style={{ borderTop: "1px solid rgba(110, 83, 32, 0.3)" }}>
+        <h4 className="parchment-numeric text-xs" style={{ color: "var(--parchment-ink-muted)" }}>Create New Battlemap</h4>
         <input
           type="text"
           value={newBattlemapName}
           onChange={(event) => setNewBattlemapName(event.target.value)}
-          className="w-full bg-black/40 border border-white/20 rounded-md px-2 py-2 text-white focus:outline-none focus:ring-1 focus:ring-white/40"
+          className="parchment-body w-full border px-2 py-2 focus:outline-none"
+          style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
           placeholder="New battlemap name"
           required
         />
         <button
           type="submit"
-          className="w-full bg-white/10 hover:bg-white/20 border border-white/20 rounded-md px-2 py-2 text-white text-sm font-medium transition disabled:opacity-50"
+          className="parchment-numeric w-full border px-3 py-2 text-sm transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-50"
+          style={{ color: "var(--parchment-bright)", borderColor: "var(--brass-shadow)", background: "var(--brass-deep)" }}
           disabled={isMutating}
         >
           Create Battlemap
@@ -502,7 +533,7 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
       </form>
 
       {statusMessage ? (
-        <div className="text-xs text-white/50">{statusMessage}</div>
+        <div className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>{statusMessage}</div>
       ) : null}
     </div>
   );
@@ -545,16 +576,20 @@ const SortableBattlemapRow = ({
   return (
     <li
       ref={setNodeRef}
-      style={style}
-      className={`flex items-stretch gap-2 rounded-lg border border-white/15 bg-black/30 p-2 transition ${
-        isDragging ? "bg-white/10 shadow-lg" : ""
-      }`}
+      style={{
+        ...style,
+        borderColor: "var(--brass-deep)",
+        background: isDragging ? "rgba(201, 162, 74, 0.18)" : "rgba(255, 252, 240, 0.4)",
+        boxShadow: isDragging ? "0 4px 14px rgba(110, 83, 32, 0.25)" : undefined,
+      }}
+      className="flex items-stretch gap-2 border p-2 transition"
     >
       <div
         {...dragHandleProps}
-        className={`flex items-center rounded-md px-2 text-white/60 transition ${
-          dragEnabled ? "cursor-grab hover:text-white" : "cursor-not-allowed opacity-30"
+        className={`flex items-center px-2 transition ${
+          dragEnabled ? "cursor-grab hover:text-[var(--brass-shadow)]" : "cursor-not-allowed opacity-30"
         }`}
+        style={{ color: "var(--brass-deep)" }}
         aria-label={dragEnabled ? "Drag to reorder" : "Reordering disabled"}
       >
         <DragHandleIcon />
@@ -563,23 +598,42 @@ const SortableBattlemapRow = ({
         type="button"
         onClick={() => onSelect(battlemap.id)}
         disabled={disabled}
-        className={`flex flex-1 items-center gap-3 rounded-md px-2 py-1 text-left transition ${
-          isActive ? "bg-white/10" : ""
-        } ${disabled ? "opacity-60" : "hover:bg-white/5"}`}
+        className={`flex flex-1 items-center gap-3 border px-2 py-1.5 text-left transition-colors ${
+          disabled ? "opacity-60" : "hover:bg-[rgba(201,162,74,0.12)]"
+        }`}
+        style={{
+          borderColor: isActive ? "var(--brass-shadow)" : "transparent",
+          background: isActive ? "rgba(201, 162, 74, 0.18)" : "transparent",
+        }}
       >
-        <span className="flex h-10 w-10 items-center justify-center rounded-md bg-gradient-to-br from-emerald-500/40 to-cyan-500/30">
+        <span
+          className="flex h-10 w-10 items-center justify-center border"
+          style={{
+            borderColor: "var(--brass-deep)",
+            background: "linear-gradient(135deg, rgba(201, 162, 74, 0.25), rgba(110, 83, 32, 0.1))",
+            color: "var(--brass-shadow)",
+          }}
+        >
           <MapBadgeIcon />
         </span>
         <div className="flex flex-1 flex-col overflow-hidden">
-          <span className="text-sm font-medium text-white">
+          <span className="parchment-body text-sm font-medium" style={{ color: "var(--parchment-ink)" }}>
             {battlemap.name || "Untitled Battlemap"}
           </span>
-          <span className="text-xs text-white/40 truncate">
+          <span className="parchment-flavor text-xs truncate" style={{ color: "var(--parchment-ink-muted)" }}>
             {battlemap.mapPath ? battlemap.mapPath : "No image uploaded"}
           </span>
         </div>
         {isActive ? (
-          <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">
+          <span
+            className="parchment-numeric border px-2 py-0.5"
+            style={{
+              fontSize: "0.65rem",
+              color: "var(--parchment-bright)",
+              borderColor: "var(--brass-shadow)",
+              background: "var(--brass-deep)",
+            }}
+          >
             Active
           </span>
         ) : null}

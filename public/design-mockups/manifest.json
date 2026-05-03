@@ -1,0 +1,45 @@
+{
+  "generatedAt": "2026-04-29T12:17:47.452Z",
+  "variants": [
+    {
+      "slug": "floating-panels__restrained",
+      "label": "Floating panels (current) · Restrained (Linear)",
+      "path": "/design-mockups/floating-panels__restrained.png"
+    },
+    {
+      "slug": "floating-panels__theatrical",
+      "label": "Floating panels (current) · Theatrical (D&D)",
+      "path": "/design-mockups/floating-panels__theatrical.png"
+    },
+    {
+      "slug": "three-pane-shell__restrained",
+      "label": "Three-pane Discord shell · Restrained (Linear)",
+      "path": "/design-mockups/three-pane-shell__restrained.png"
+    },
+    {
+      "slug": "three-pane-shell__theatrical",
+      "label": "Three-pane Discord shell · Theatrical (D&D)",
+      "path": "/design-mockups/three-pane-shell__theatrical.png"
+    },
+    {
+      "slug": "left-rail-only__restrained",
+      "label": "Linear-style left rail · Restrained (Linear)",
+      "path": "/design-mockups/left-rail-only__restrained.png"
+    },
+    {
+      "slug": "left-rail-only__theatrical",
+      "label": "Linear-style left rail · Theatrical (D&D)",
+      "path": "/design-mockups/left-rail-only__theatrical.png"
+    },
+    {
+      "slug": "canvas-first__restrained",
+      "label": "Owlbear minimalist canvas-first · Restrained (Linear)",
+      "path": "/design-mockups/canvas-first__restrained.png"
+    },
+    {
+      "slug": "canvas-first__theatrical",
+      "label": "Owlbear minimalist canvas-first · Theatrical (D&D)",
+      "path": "/design-mockups/canvas-first__theatrical.png"
+    }
+  ]
+}

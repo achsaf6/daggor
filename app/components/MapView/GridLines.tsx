@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { ImageBounds } from '../../types';
 import { useCoordinateMapper } from '../../hooks/useCoordinateMapper';
 import { computeGridLines } from '../../utils/grid';
@@ -15,12 +16,14 @@ interface GridLinesProps {
     imageHeight: number;
   };
   imageBounds: ImageBounds | null;
-  gridScale?: number; // Scale factor for grid size (1.0 = original, >1.0 = larger cells, <1.0 = smaller cells)
-  gridOffsetX?: number; // Horizontal offset in pixels
-  gridOffsetY?: number; // Vertical offset in pixels
+  gridScale?: number;
+  gridOffsetX?: number;
+  gridOffsetY?: number;
 }
 
-export const GridLines = ({
+const GRID_LINE_STROKE = "rgba(255, 255, 255, 0.3)";
+
+const GridLinesInner = ({
   gridData,
   imageBounds,
   gridScale = 1.0,
@@ -111,7 +114,7 @@ export const GridLines = ({
           y1={0}
           x2={x * scaleX}
           y2={imageBounds.height}
-          stroke="rgba(255, 255, 255, 0.3)"
+          stroke={GRID_LINE_STROKE}
           strokeWidth="1"
           fill="none"
         />
@@ -125,7 +128,7 @@ export const GridLines = ({
           y1={y * scaleY}
           x2={imageBounds.width}
           y2={y * scaleY}
-          stroke="rgba(255, 255, 255, 0.3)"
+          stroke={GRID_LINE_STROKE}
           strokeWidth="1"
           fill="none"
         />
@@ -133,3 +136,24 @@ export const GridLines = ({
     </svg>
   );
 };
+
+// Re-render only when inputs that affect the rendered SVG change. This stops a
+// token drag (which re-renders parent surfaces every frame) from forcing the
+// gridline SVG to recompute its 50–200 line elements.
+export const GridLines = memo(GridLinesInner, (prev, next) => {
+  if (prev.gridScale !== next.gridScale) return false;
+  if (prev.gridOffsetX !== next.gridOffsetX) return false;
+  if (prev.gridOffsetY !== next.gridOffsetY) return false;
+  if (prev.gridData !== next.gridData) return false;
+  if (prev.imageBounds === next.imageBounds) return true;
+  if (!prev.imageBounds || !next.imageBounds) return false;
+  return (
+    prev.imageBounds.left === next.imageBounds.left &&
+    prev.imageBounds.top === next.imageBounds.top &&
+    prev.imageBounds.width === next.imageBounds.width &&
+    prev.imageBounds.height === next.imageBounds.height &&
+    prev.imageBounds.containerLeft === next.imageBounds.containerLeft &&
+    prev.imageBounds.containerTop === next.imageBounds.containerTop
+  );
+});
+GridLines.displayName = "GridLines";

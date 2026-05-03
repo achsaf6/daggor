@@ -2,14 +2,17 @@
 
 import React, { useRef, useCallback, useEffect, useMemo } from "react";
 import { useSocket } from "../../../hooks/useSocket";
+import { useSurface } from "../../../hooks/useSurface";
 import { useImageBounds } from "../../../hooks/useImageBounds";
 import { useViewMode } from "../../../hooks/useViewMode";
+import { useInitiative } from "../../../hooks/useInitiative";
+import { useSoundboardListener } from "../../../hooks/useSoundboardListener";
 import { useCoordinateMapper } from "../../../hooks/useCoordinateMapper";
 import { MapImage } from "../MapImage";
 import { DraggableToken } from "../../Token/DraggableToken";
 import { TokenManager } from "../../Token/TokenManager";
-import { CoverManager } from "../../Toolbar/CoverManager";
 import { GridLines } from "../GridLines";
+import { FogOfWar } from "../FogOfWar";
 import { usePanZoom } from "./hooks/usePanZoom";
 import { useViewportOffset } from "./hooks/useViewportOffset";
 import { useAutoCenter } from "./hooks/useAutoCenter";
@@ -27,6 +30,7 @@ interface MapViewMobileProps {
 export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { isMounted } = useViewMode();
+  const surface = useSurface();
   const {
     myUserId,
     myColor,
@@ -38,7 +42,18 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     updateTokenPosition,
     updateTokenImage,
     removeToken,
-  } = useSocket(false);
+    socket,
+  } = useSocket(surface);
+  const { state: initiativeState } = useInitiative(socket);
+  // Plays clips broadcast by the dashboard. Browsers gate autoplay; the
+  // LoadingScreen "Enter" tap unlocks audio for this page.
+  useSoundboardListener(socket);
+  const currentTurnTokenId =
+    initiativeState.currentIndex >= 0 &&
+    initiativeState.currentIndex < initiativeState.entries.length
+      ? initiativeState.entries[initiativeState.currentIndex].tokenId
+      : null;
+  const isMyTurn = Boolean(myUserId && currentTurnTokenId === myUserId);
   const { character, hasSelectedCharacter } = useCharacter();
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const { currentBattlemap, isBattlemapLoading } = useBattlemap();
@@ -91,7 +106,10 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     worldMapHeight
   );
 
-  const covers = useMemo(() => currentBattlemap?.covers ?? [], [currentBattlemap?.covers]);
+  const fogShapes = useMemo(
+    () => currentBattlemap?.fogShapes ?? [],
+    [currentBattlemap?.fogShapes]
+  );
 
   // Pan and zoom state
   const {
@@ -131,8 +149,12 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     worldMapHeight,
   });
 
-  // Auto-center functionality
-  const shouldAutoCenter = useCallback(() => !draggingTokenIdRef.current, []);
+  // Auto-center functionality — also pause if user is mid-pan,
+  // so a manually panned view does not snap back after the inactivity timer.
+  const shouldAutoCenter = useCallback(
+    () => !draggingTokenIdRef.current && !panStateRef.current.isPanning,
+    [panStateRef]
+  );
 
   const { resetInactivityTimer, inactivityTimerRef, lastInteractionRef } = useAutoCenter({
     calculateViewportOffset,
@@ -256,7 +278,7 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     <div
       ref={containerRef}
       className="fixed inset-0 m-0 p-0 overflow-hidden"
-      style={{ 
+      style={{
         touchAction: "none",
         userSelect: "none",
         WebkitUserSelect: "none",
@@ -264,14 +286,19 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
         msUserSelect: "none",
       }}
     >
+      {isMyTurn && (
+        <div
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-50 px-4 py-1.5 rounded-full border border-primary/60 bg-primary text-primary-foreground text-[11px] uppercase tracking-[0.25em] shadow-lg pointer-events-none animate-in fade-in slide-in-from-top-4"
+          style={{
+            animationDuration: "var(--dur-base)",
+            animationTimingFunction: "var(--ease-emphasized)",
+          }}
+        >
+          Your turn
+        </div>
+      )}
       <div style={mapWrapperStyle}>
         <MapImage onLoad={updateBounds} src={currentBattlemap?.mapPath ?? undefined} />
-        <CoverManager
-          covers={covers}
-          imageBounds={imageBounds}
-          worldMapWidth={worldMapWidth}
-          worldMapHeight={worldMapHeight}
-        />
         {imageBounds && currentBattlemap && (
           <GridLines
             gridData={effectiveGridData}
@@ -280,6 +307,10 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
             gridOffsetX={gridOffsetX}
             gridOffsetY={gridOffsetY}
           />
+        )}
+        {/* Players see fog fully opaque — only revealed shapes are visible. */}
+        {imageBounds && (
+          <FogOfWar shapes={fogShapes} imageBounds={imageBounds} opacity={1} />
         )}
         {imageBounds && myUserId && (
           <div data-token>

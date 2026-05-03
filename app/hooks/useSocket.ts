@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { io, Socket } from "socket.io-client";
-import { User, Position, Cover, TokenSize, TokenTemplate } from "../types";
+import { User, Position, TokenSize, TokenTemplate } from "../types";
+import { Surface, isDmSurface } from "./useSurface";
 
 interface UserWithPersistentId extends User {
   persistentUserId?: string;
@@ -14,7 +15,6 @@ interface UseSocketReturn {
   mySize: TokenSize;
   otherUsers: Map<string, User>;
   disconnectedUsers: Map<string, User>;
-  covers: Map<string, Cover>;
   socket: Socket | null;
   updateMyPosition: (position: Position) => void;
   updateTokenPosition: (tokenId: string, position: Position) => void;
@@ -22,12 +22,10 @@ interface UseSocketReturn {
   updateTokenSize: (tokenId: string, size: TokenSize) => void;
   removeToken: (persistentUserId: string) => void;
   addToken: (tokenTemplate: TokenTemplate, position?: Position) => void;
-  addCover: (cover: Omit<Cover, "id">) => void;
-  removeCover: (id: string) => void;
-  updateCover: (id: string, updates: Partial<Cover>) => void;
 }
 
-export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
+export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
+  const isDisplay = isDmSurface(surface);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [myColor, setMyColor] = useState<string>("#ef4444");
   const [myPosition, setMyPosition] = useState<Position>({ x: 50, y: 50 });
@@ -35,37 +33,13 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
   const [mySize, setMySize] = useState<TokenSize>("medium");
   const [otherUsers, setOtherUsers] = useState<Map<string, User>>(new Map());
   const [disconnectedUsers, setDisconnectedUsers] = useState<Map<string, User>>(new Map());
-  const [covers, setCovers] = useState<Map<string, Cover>>(new Map());
   const [socket, setSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const persistentUserIdRef = useRef<string | null>(null);
   const myUserIdRef = useRef<string | null>(null);
 
-  const clamp = useCallback((value: number, min: number, max: number) => {
-    return Math.min(Math.max(value, min), max);
-  }, []);
-
-  const normalizeCover = useCallback(
-    (cover: Cover): Cover => {
-      const width = clamp(cover.width ?? 0, 0, 100);
-      const height = clamp(cover.height ?? 0, 0, 100);
-      const maxX = 100 - width;
-      const maxY = 100 - height;
-
-      return {
-        id: cover.id,
-        width,
-        height,
-        x: clamp(cover.x ?? 0, 0, maxX),
-        y: clamp(cover.y ?? 0, 0, maxY),
-        color: cover.color || "#808080",
-      };
-    },
-    [clamp]
-  );
-
-  const generateCoverId = () =>
-    `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  // Legacy normalizeCover/generateCoverId removed — covers live exclusively
+  // under currentBattlemap (BattlemapProvider) now.
 
   // Get or create persistent user ID from localStorage
   useEffect(() => {
@@ -107,13 +81,23 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
       setSocket(socketInstance);
     });
 
+    // Dev-only: expose the live socket on window so Playwright tests can
+    // observe socket id, listen for events, and assert cross-context sync.
+    // Production builds skip this branch entirely.
+    if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+      const w = window as unknown as { __daggor?: Record<string, unknown> };
+      w.__daggor = { ...(w.__daggor ?? {}), socket: socketInstance, surface };
+    }
+
     // Handle connection
     socketInstance.on("connect", () => {
       console.log("Connected to server");
       // Send user identification immediately after connection
       socketInstance.emit("user-identify", {
         persistentUserId: persistentUserIdRef.current,
-        isDisplay: isDisplay,
+        surface,
+        // Kept for back-compat with older server logic that still reads isDisplay.
+        isDisplay,
       });
     });
 
@@ -454,58 +438,15 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
       }
     );
 
-    socketInstance.on("all-covers", (coversList: Cover[]) => {
-      const coversMap = new Map<string, Cover>();
-      coversList.forEach((cover) => {
-        if (cover && typeof cover.id === "string") {
-          coversMap.set(cover.id, normalizeCover(cover));
-        }
-      });
-      setCovers(coversMap);
-    });
-
-    socketInstance.on("cover-added", (cover: Cover) => {
-      if (!cover || typeof cover.id !== "string") {
-        return;
-      }
-
-      setCovers((prev) => {
-        const updated = new Map(prev);
-        updated.set(cover.id, normalizeCover(cover));
-        return updated;
-      });
-    });
-
-    socketInstance.on("cover-removed", (data: { id: string }) => {
-      if (!data || typeof data.id !== "string") {
-        return;
-      }
-
-      setCovers((prev) => {
-        const updated = new Map(prev);
-        updated.delete(data.id);
-        return updated;
-      });
-    });
-
-    socketInstance.on("cover-updated", (cover: Cover) => {
-      if (!cover || typeof cover.id !== "string") {
-        return;
-      }
-
-      setCovers((prev) => {
-        const updated = new Map(prev);
-        const existing = updated.get(cover.id);
-        updated.set(cover.id, normalizeCover({ ...existing, ...cover }));
-        return updated;
-      });
-    });
+    // Legacy cover events (all-covers/cover-added/cover-removed/cover-updated)
+    // and their server handlers were removed. Battlemap-scoped covers come
+    // through `battlemap:updated` and live on currentBattlemap.covers.
 
     // Cleanup on unmount
     return () => {
       socketInstance.disconnect();
     };
-  }, [isDisplay, normalizeCover]);
+  }, [surface, isDisplay]);
 
   const updateMyPosition = (position: Position) => {
     setMyPosition(position);
@@ -635,59 +576,6 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     }
   };
 
-  const addCover = (cover: Omit<Cover, "id">) => {
-    const newCover = normalizeCover({
-      id: generateCoverId(),
-      ...cover,
-    });
-
-    setCovers((prev) => {
-      const updated = new Map(prev);
-      updated.set(newCover.id, newCover);
-      return updated;
-    });
-
-    if (socketRef.current) {
-      socketRef.current.emit("add-cover", newCover);
-    }
-  };
-
-  const removeCover = (id: string) => {
-    setCovers((prev) => {
-      if (!prev.has(id)) {
-        return prev;
-      }
-      const updated = new Map(prev);
-      updated.delete(id);
-      return updated;
-    });
-
-    if (socketRef.current) {
-      socketRef.current.emit("remove-cover", { id });
-    }
-  };
-
-  const updateCover = (id: string, updates: Partial<Cover>) => {
-    setCovers((prev) => {
-      const existing = prev.get(id);
-      if (!existing) {
-        return prev;
-      }
-      const normalized = normalizeCover({
-        ...existing,
-        ...updates,
-        id,
-      });
-      const updated = new Map(prev);
-      updated.set(id, normalized);
-      return updated;
-    });
-
-    if (socketRef.current) {
-      socketRef.current.emit("update-cover", { id, ...updates });
-    }
-  };
-
   return {
     myUserId,
     myColor,
@@ -696,7 +584,6 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     mySize,
     otherUsers,
     disconnectedUsers,
-    covers,
     socket,
     updateMyPosition,
     updateTokenPosition,
@@ -704,9 +591,6 @@ export const useSocket = (isDisplay: boolean = false): UseSocketReturn => {
     updateTokenSize,
     removeToken,
     addToken,
-    addCover,
-    removeCover,
-    updateCover,
   };
 };
 

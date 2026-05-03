@@ -41,6 +41,7 @@ const battlemapState = {
 let supportsBattlemapImages = false;
 let supportsBattlemapActiveImageId = true; // optimistic; will be disabled if column missing
 let supportsBattlemapCoverImageId = false;
+let supportsBattlemapSpawnArea = true; // optimistic; disabled if migration 008 not applied
 
 const persistBattlemapOrder = (orderedIds) => {
   if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
@@ -101,6 +102,104 @@ const cloneGridData = (gridData = DEFAULT_BATTLEMAP_GRID_DATA) => sanitizeGridDa
 
 const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
 
+const HEX_COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const sanitizeHexColor = (value, fallback = '#808080') => {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  return HEX_COLOR_RE.test(trimmed) ? trimmed : fallback;
+};
+
+// Reject non-finite numbers and clamp to [0, 100] image-relative %.
+const sanitizePositionComponent = (value) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return clampValue(value, 0, 100);
+};
+
+const sanitizePosition = (input, fallback = { x: 50, y: 50 }) => {
+  if (!input || typeof input !== 'object') return { ...fallback };
+  const x = sanitizePositionComponent(input.x);
+  const y = sanitizePositionComponent(input.y);
+  if (x === null || y === null) return { ...fallback };
+  return { x, y };
+};
+
+// Block data:, file:, javascript:, vbscript:, embedded nulls, and anything over 2 KiB.
+// Accept http(s) URLs and relative paths starting with '/'.
+const MAX_URL_LENGTH = 2048;
+const BLOCKED_URL_SCHEMES = /^(?:data|file|javascript|vbscript|blob):/i;
+const sanitizeAssetUrl = (value) => {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > MAX_URL_LENGTH) return null;
+  if (trimmed.includes('\0') || trimmed.includes('\n') || trimmed.includes('\r')) return null;
+  if (BLOCKED_URL_SCHEMES.test(trimmed)) return null;
+  if (trimmed.startsWith('/')) return trimmed;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return null;
+};
+
+// A spawn area is a rectangle in image-relative % coordinates ({x, y, width,
+// height}, all 0..100). Returns the default 20x20 centred square if anything
+// is malformed.
+const DEFAULT_SPAWN_AREA = { x: 40, y: 40, width: 20, height: 20 };
+const sanitizeSpawnArea = (input) => {
+  if (!input || typeof input !== 'object') return { ...DEFAULT_SPAWN_AREA };
+  const width = clampValue(typeof input.width === 'number' ? input.width : DEFAULT_SPAWN_AREA.width, 1, 100);
+  const height = clampValue(typeof input.height === 'number' ? input.height : DEFAULT_SPAWN_AREA.height, 1, 100);
+  const maxX = 100 - width;
+  const maxY = 100 - height;
+  return {
+    x: clampValue(typeof input.x === 'number' ? input.x : DEFAULT_SPAWN_AREA.x, 0, maxX),
+    y: clampValue(typeof input.y === 'number' ? input.y : DEFAULT_SPAWN_AREA.y, 0, maxY),
+    width,
+    height,
+  };
+};
+
+// Pick `count` distinct spawn positions inside the rectangle. Cells are laid
+// out in a grid that is roughly square so 1, 2, 4, 9 players space out
+// naturally. Returns image-relative {x, y} centres.
+const pickSpawnPositions = (spawnArea, count) => {
+  if (count <= 0) return [];
+  const area = sanitizeSpawnArea(spawnArea);
+  const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
+  const rows = Math.max(1, Math.ceil(count / cols));
+  const cellW = area.width / cols;
+  const cellH = area.height / rows;
+  const positions = [];
+  for (let i = 0; i < count; i += 1) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    positions.push({
+      x: area.x + cellW * (col + 0.5),
+      y: area.y + cellH * (row + 0.5),
+    });
+  }
+  return positions;
+};
+
+// Fog of war "reveal" shape: a rectangle (in image-relative %) that the DM
+// drew to expose part of the map. Fog is the inverse — the renderer covers
+// everything except the union of these shapes.
+const sanitizeFogShape = (input) => {
+  if (!input || typeof input !== 'object') return null;
+  const x = sanitizePositionComponent(input.x);
+  const y = sanitizePositionComponent(input.y);
+  const w = clampValue(typeof input.width === 'number' ? input.width : 0, 0, 100);
+  const h = clampValue(typeof input.height === 'number' ? input.height : 0, 0, 100);
+  if (x === null || y === null || w < 0.5 || h < 0.5) return null;
+  return {
+    id: typeof input.id === 'string' && input.id ? input.id
+      : `fog-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    x: clampValue(x, 0, 100 - w),
+    y: clampValue(y, 0, 100 - h),
+    width: w,
+    height: h,
+  };
+};
+
 const sanitizeCover = (input) => {
   const width = clampValue(typeof input.width === 'number' ? input.width : 0, 0, 100);
   const height = clampValue(typeof input.height === 'number' ? input.height : 0, 0, 100);
@@ -113,7 +212,7 @@ const sanitizeCover = (input) => {
     height,
     x: clampValue(typeof input.x === 'number' ? input.x : 0, 0, maxX),
     y: clampValue(typeof input.y === 'number' ? input.y : 0, 0, maxY),
-    color: typeof input.color === 'string' && input.color.trim() !== '' ? input.color : '#808080',
+    color: sanitizeHexColor(input.color),
   };
 };
 
@@ -145,6 +244,12 @@ const getBattlemapCoversForActiveImage = (battlemap) => {
   return Array.from(coversMap.values());
 };
 
+const getFogShapesForActiveImage = (battlemap) => {
+  if (!battlemap?.fogByImage || !battlemap?.activeImageId) return [];
+  const arr = battlemap.fogByImage[battlemap.activeImageId];
+  return Array.isArray(arr) ? arr : [];
+};
+
 const serializeBattlemap = (battlemap) => ({
   id: battlemap.id,
   name: battlemap.name,
@@ -155,7 +260,8 @@ const serializeBattlemap = (battlemap) => ({
   gridOffsetX: battlemap.gridOffsetX,
   gridOffsetY: battlemap.gridOffsetY,
   gridData: battlemap.gridData,
-  covers: getBattlemapCoversForActiveImage(battlemap),
+  spawnArea: sanitizeSpawnArea(battlemap.spawnArea),
+  fogShapes: getFogShapesForActiveImage(battlemap),
 });
 
 const logEvent = (...args) => {
@@ -176,6 +282,7 @@ const loadBattlemapStateFromSupabase = async () => {
         grid_offset_x,
         grid_offset_y,
         grid_data,
+        spawn_area,
         sort_index
       `
     )
@@ -183,30 +290,47 @@ const loadBattlemapStateFromSupabase = async () => {
     .order('created_at', { ascending: true });
 
   if (error) {
-    // Older schemas might not have active_image_id; retry without it.
+    // Older schemas might not have active_image_id and/or spawn_area; retry
+    // dropping whichever column is reported as missing.
     const message = typeof error?.message === 'string' ? error.message : '';
-    if (message.includes('active_image_id')) {
-      supportsBattlemapActiveImageId = false;
+    if (message.includes('active_image_id') || message.includes('spawn_area')) {
+      if (message.includes('active_image_id')) supportsBattlemapActiveImageId = false;
+      if (message.includes('spawn_area')) supportsBattlemapSpawnArea = false;
+      const retryColumns = [
+        'id',
+        'name',
+        'map_path',
+        supportsBattlemapActiveImageId ? 'active_image_id' : null,
+        'grid_scale',
+        'grid_offset_x',
+        'grid_offset_y',
+        'grid_data',
+        supportsBattlemapSpawnArea ? 'spawn_area' : null,
+        'sort_index',
+      ].filter(Boolean).join(',\n            ');
       const retry = await supabase
         .from('battlemaps')
-        .select(
-          `
-            id,
-            name,
-            map_path,
-            grid_scale,
-            grid_offset_x,
-            grid_offset_y,
-            grid_data,
-            sort_index
-          `
-        )
+        .select(retryColumns)
         .order('sort_index', { ascending: true })
         .order('created_at', { ascending: true });
       if (retry.error) {
-        throw retry.error;
+        // If the second column is missing too, retry once more without it.
+        const m = typeof retry.error?.message === 'string' ? retry.error.message : '';
+        if (m.includes('spawn_area')) {
+          supportsBattlemapSpawnArea = false;
+          const retry2 = await supabase
+            .from('battlemaps')
+            .select(`id, name, map_path, grid_scale, grid_offset_x, grid_offset_y, grid_data, sort_index`)
+            .order('sort_index', { ascending: true })
+            .order('created_at', { ascending: true });
+          if (retry2.error) throw retry2.error;
+          battlemapRows = retry2.data;
+        } else {
+          throw retry.error;
+        }
+      } else {
+        battlemapRows = retry.data;
       }
-      battlemapRows = retry.data;
     } else {
       throw error;
     }
@@ -305,6 +429,7 @@ const loadBattlemapStateFromSupabase = async () => {
       gridOffsetY:
         typeof row.grid_offset_y === 'number' ? row.grid_offset_y : DEFAULT_SETTINGS.gridOffsetY,
       gridData: sanitizeGridData(row.grid_data),
+      spawnArea: sanitizeSpawnArea(row.spawn_area),
       covers: new Map(),
     });
   }
@@ -382,8 +507,6 @@ const loadBattlemapStateFromSupabase = async () => {
 const users = new Map();
 // Store disconnected users temporarily to restore on reconnect (in-memory)
 const disconnectedUsers = new Map();
-// Store covers (in-memory)
-const covers = new Map();
 
 // Generate random color
 function getRandomColor() {
@@ -417,6 +540,21 @@ app.prepare().then(async () => {
   // Create Socket.IO server
   const io = new Server(httpServer);
 
+  // Evict disconnected users that have been gone longer than the TTL so the
+  // in-memory map does not grow unbounded over a long session.
+  const DISCONNECTED_USER_TTL_MS = 30 * 60 * 1000; // 30 minutes
+  const DISCONNECTED_USER_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+  setInterval(() => {
+    const cutoff = Date.now() - DISCONNECTED_USER_TTL_MS;
+    for (const [persistentId, entry] of disconnectedUsers.entries()) {
+      const since = typeof entry?.disconnectedAt === 'number' ? entry.disconnectedAt : 0;
+      if (since && since < cutoff) {
+        disconnectedUsers.delete(persistentId);
+        io.emit('token-removed', { persistentUserId: persistentId });
+      }
+    }
+  }, DISCONNECTED_USER_SWEEP_INTERVAL_MS).unref();
+
   const runBackgroundTask = (description, task) => {
     setImmediate(() => {
       Promise.resolve()
@@ -439,6 +577,130 @@ app.prepare().then(async () => {
   const broadcastActiveBattlemap = () => {
     logEvent('Broadcasting active battlemap', battlemapState.activeBattlemapId ?? 'none');
     io.emit('battlemap:active', { battlemapId: battlemapState.activeBattlemapId });
+  };
+
+  // Per-battlemap broadcast helper. Token moves, cover edits, presence — anything
+  // that only matters to clients viewing the same map — should fan out via this
+  // helper instead of io.emit so we can scope to the room. Keeps `battlemap:list`
+  // and friends on io.emit since every client needs them regardless of room.
+  const battlemapRoom = (battlemapId) =>
+    battlemapId ? `bm:${battlemapId}` : null;
+  const broadcastToActive = (event, payload) => {
+    const room = battlemapRoom(battlemapState.activeBattlemapId);
+    if (room) {
+      io.to(room).emit(event, payload);
+    } else {
+      io.emit(event, payload);
+    }
+  };
+  // socket.broadcast.emit equivalent that is also room-scoped (excludes sender).
+  const broadcastFromSocketToActive = (originSocket, event, payload) => {
+    const room = battlemapRoom(battlemapState.activeBattlemapId);
+    if (room) {
+      originSocket.to(room).emit(event, payload);
+    } else {
+      originSocket.broadcast.emit(event, payload);
+    }
+  };
+
+  // Drop every active token (player + DM-spawned) and every disconnected
+  // entry, then re-seat connected, non-DM sockets into spawn-area cells on the
+  // new active battlemap. Called when the active battlemap changes — players
+  // should never carry their old position onto a new map.
+  const resetTokensForActiveBattlemap = async () => {
+    // 1. Tell everyone the old tokens are gone.
+    for (const [, user] of users.entries()) {
+      const persistentId = user.persistentUserId || user.id;
+      broadcastToActive('token-removed', { persistentUserId: persistentId });
+    }
+    for (const persistentId of disconnectedUsers.keys()) {
+      broadcastToActive('token-removed', { persistentUserId: persistentId });
+    }
+    users.clear();
+    disconnectedUsers.clear();
+
+    // 2. Re-seat each connected non-DM socket. Use spawn area from the new
+    // battlemap, distributed across distinct cells.
+    const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+    const spawnArea = sanitizeSpawnArea(battlemap?.spawnArea);
+    let connectedSockets;
+    try {
+      connectedSockets = await io.fetchSockets();
+    } catch (err) {
+      console.error('[Battlemap reset] fetchSockets failed', err);
+      return;
+    }
+    const playerSockets = connectedSockets.filter((s) => {
+      // displayModeUsers and absent userData both mean "not a re-seatable player".
+      return !displayModeUsers.has(s.id);
+    });
+    const positions = pickSpawnPositions(spawnArea, playerSockets.length);
+
+    playerSockets.forEach((s, i) => {
+      const stored = users.get(s.id); // empty after clear; rely on _userData ref instead
+      // We keep the per-socket persistent ID by re-running the identification
+      // path: ask each socket to reidentify by emitting a short "respawn" hint.
+      // Simpler: synthesise a fresh user entry with the same persistent ID we
+      // can derive from the socket's stored ref (set in initializeUser).
+      const persistentId = s.data?.persistentUserId || stored?.persistentUserId || s.id;
+      const color = s.data?.color || getRandomColor();
+      const size = sanitizeTokenSize(s.data?.size);
+      const position = positions[i] ?? { x: 50, y: 50 };
+      const userData = {
+        id: s.id,
+        persistentUserId: persistentId,
+        color,
+        position,
+        size,
+        imageSrc: s.data?.imageSrc || null,
+        surface: s.data?.surface || 'mobile',
+        isDisplay: false,
+      };
+      users.set(s.id, userData);
+      // Remember on the socket so future reconnects can restore.
+      s.data = { ...(s.data || {}), persistentUserId: persistentId, color, size };
+      // Tell each player their own new position, and broadcast to others.
+      s.emit('user-connected', {
+        userId: s.id,
+        persistentUserId: persistentId,
+        color,
+        position,
+        imageSrc: userData.imageSrc,
+        size,
+      });
+      broadcastFromSocketToActive(s, 'user-joined', {
+        userId: s.id,
+        persistentUserId: persistentId,
+        color,
+        position,
+        imageSrc: userData.imageSrc,
+        size,
+      });
+    });
+    // Re-broadcast the full active list to each player so everyone sees the
+    // freshly-seated cohort consistently.
+    const activeList = Array.from(users.values()).filter((u) => !u.isDisplay);
+    io.to(battlemapRoom(battlemapState.activeBattlemapId)).emit('all-users', activeList);
+  };
+
+  // Move every connected socket from the old battlemap room to the new one.
+  // Used when the DM switches the active battlemap.
+  const moveSocketsToActiveBattlemapRoom = (previousId) => {
+    const previousRoom = battlemapRoom(previousId);
+    const nextRoom = battlemapRoom(battlemapState.activeBattlemapId);
+    if (previousRoom && previousRoom !== nextRoom) {
+      io.in(previousRoom).socketsLeave(previousRoom);
+    }
+    if (nextRoom) {
+      // Have every connected socket join the new room. Future surfaces that
+      // want per-client room targeting should opt in instead, but right now
+      // there is only ever one active battlemap globally.
+      io.fetchSockets().then((sockets) => {
+        sockets.forEach((s) => s.join(nextRoom));
+      }).catch((err) => {
+        console.error('[Battlemap rooms] failed to migrate sockets', err);
+      });
+    }
   };
 
   const ensureActiveBattlemap = () => {
@@ -479,6 +741,9 @@ app.prepare().then(async () => {
       if (supportsBattlemapActiveImageId) {
         row.active_image_id = battlemap.activeImageId ?? null;
       }
+      if (supportsBattlemapSpawnArea) {
+        row.spawn_area = sanitizeSpawnArea(battlemap.spawnArea);
+      }
       return row;
     })());
 
@@ -502,6 +767,9 @@ app.prepare().then(async () => {
         };
         if (supportsBattlemapActiveImageId) {
           row.active_image_id = battlemap.activeImageId ?? null;
+        }
+        if (supportsBattlemapSpawnArea) {
+          row.spawn_area = sanitizeSpawnArea(battlemap.spawnArea);
         }
         return row;
       })())
@@ -714,15 +982,30 @@ app.prepare().then(async () => {
 
       // Use restored data or create new user
       const color = restoredUserData?.color || getRandomColor();
-      const position = restoredUserData?.position || { x: 50, y: 50 };
+      // Drop new players into the active battlemap's spawn area at a fresh
+      // cell so they don't all land on the same square.
+      let position = restoredUserData?.position;
+      if (!position) {
+        const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+        const spawn = sanitizeSpawnArea(battlemap?.spawnArea);
+        const existingCount = Array.from(users.values()).filter((u) => !u.isDisplay).length;
+        const positions = pickSpawnPositions(spawn, existingCount + 1);
+        position = positions[existingCount] ?? { x: spawn.x + spawn.width / 2, y: spawn.y + spawn.height / 2 };
+      }
       const size = sanitizeTokenSize(restoredUserData?.size);
 
-      const isDisplay = data?.isDisplay || false;
+      // Surface = which route the client is on: 'mobile' (player), 'display'
+      // (projector), or 'dashboard' (DM control panel). Dashboard and display
+      // are DM-trusted; only dashboard is allowed to mutate battlemap structure.
+      const VALID_SURFACES = new Set(['mobile', 'display', 'dashboard']);
+      const surface = VALID_SURFACES.has(data?.surface)
+        ? data.surface
+        : (data?.isDisplay ? 'display' : 'mobile');
+      const isDisplay = surface === 'display' || surface === 'dashboard';
       const suppressPresence = Boolean(data?.suppressPresence);
-      const allowBattlemapMutations =
-        typeof data?.allowBattlemapMutations === 'boolean'
-          ? data.allowBattlemapMutations
-          : isDisplay;
+      // Only the dashboard is allowed to mutate battlemap structure. Display
+      // and mobile clients can request mutations but the server refuses.
+      const allowBattlemapMutations = surface === 'dashboard';
 
       userData = {
         id: userId,
@@ -730,10 +1013,28 @@ app.prepare().then(async () => {
         color,
         position,
         size,
-        isDisplay, // Track if this is a display mode user
+        surface,
+        isDisplay, // Kept for legacy code paths that read isDisplay directly.
         allowBattlemapMutations,
         suppressPresence,
       };
+
+      // Mirror identity onto socket.data so the battlemap-switch reset can
+      // re-seat this socket without losing color/size/persistentUserId.
+      socket.data = {
+        ...(socket.data || {}),
+        persistentUserId,
+        color,
+        size,
+        surface,
+        imageSrc: null,
+      };
+
+      // Join the room for the currently active battlemap so per-map broadcasts
+      // (token moves, covers, etc.) only fan out to clients on that map.
+      if (battlemapState.activeBattlemapId) {
+        socket.join(`bm:${battlemapState.activeBattlemapId}`);
+      }
 
       if (suppressPresence) {
         return;
@@ -763,10 +1064,6 @@ app.prepare().then(async () => {
       const activeUsersList = Array.from(users.values()).filter(user => !user.isDisplay);
       socket.emit('all-users', activeUsersList);
 
-      if (covers.size > 0) {
-        socket.emit('all-covers', Array.from(covers.values()));
-      }
-
       // Send disconnected users (for display mode users to track)
       const disconnectedUsersList = Array.from(disconnectedUsers.values());
       if (disconnectedUsersList.length > 0) {
@@ -778,7 +1075,7 @@ app.prepare().then(async () => {
       if (!isDisplay) {
         // Broadcast new user to all other clients (only if not a restoration)
         if (!restoredUserData) {
-          socket.broadcast.emit('user-joined', {
+          broadcastFromSocketToActive(socket, 'user-joined', {
             userId,
             persistentUserId: userData.persistentUserId,
             color,
@@ -788,7 +1085,7 @@ app.prepare().then(async () => {
           });
         } else {
           // User reconnected - broadcast reconnection
-          socket.broadcast.emit('user-reconnected', {
+          broadcastFromSocketToActive(socket, 'user-reconnected', {
             userId,
             persistentUserId: userData.persistentUserId,
             color,
@@ -833,10 +1130,9 @@ app.prepare().then(async () => {
         typeof payload?.name === 'string' && payload.name.trim() !== ''
           ? payload.name.trim()
           : 'Untitled Battlemap';
-      const sanitizedPath =
-        typeof payload?.mapPath === 'string' && payload.mapPath.trim() !== ''
-          ? payload.mapPath.trim()
-          : null;
+      // sanitizeAssetUrl rejects data:, file:, javascript:, and over-long inputs;
+      // accepts http(s) URLs and relative paths starting with '/'.
+      const sanitizedPath = sanitizeAssetUrl(payload?.mapPath);
       const battlemapId = randomUUID();
       const initialImageId = supportsBattlemapImages ? randomUUID() : null;
 
@@ -872,6 +1168,7 @@ app.prepare().then(async () => {
       broadcastBattlemapList();
       if (!battlemapState.activeBattlemapId) {
         battlemapState.activeBattlemapId = battlemapId;
+        moveSocketsToActiveBattlemapRoom(null);
         broadcastActiveBattlemap();
       }
       emitBattlemapUpdate(battlemapId);
@@ -1091,9 +1388,18 @@ app.prepare().then(async () => {
       }
 
       if (battlemapState.activeBattlemapId !== battlemapId) {
+        const previousId = battlemapState.activeBattlemapId;
         battlemapState.activeBattlemapId = battlemapId;
         logEvent('Active battlemap set to', battlemapId);
+        // Move every connected socket from the previous battlemap room into
+        // the new one before any per-battlemap broadcasts go out.
+        moveSocketsToActiveBattlemapRoom(previousId);
         broadcastActiveBattlemap();
+        // Players from the old map should not bleed into the new map. Reseat
+        // them in the new battlemap's spawn area.
+        resetTokensForActiveBattlemap().catch((err) => {
+          console.error('[Battlemap reset] failed', err);
+        });
       }
 
       respond(ack, { ok: true });
@@ -1164,10 +1470,9 @@ app.prepare().then(async () => {
         return;
       }
 
-      const sanitizedPath =
-        typeof payload?.mapPath === 'string' && payload.mapPath.trim() !== ''
-          ? payload.mapPath.trim()
-          : null;
+      // sanitizeAssetUrl rejects data:, file:, javascript:, and over-long inputs;
+      // accepts http(s) URLs and relative paths starting with '/'.
+      const sanitizedPath = sanitizeAssetUrl(payload?.mapPath);
 
       const targetImageId = payload?.battlemapImageId || payload?.imageId;
 
@@ -1252,6 +1557,237 @@ app.prepare().then(async () => {
       runBackgroundTask('update battlemap settings', () => updateBattlemapRow(battlemap.id));
     });
 
+    // ---------------- Fog of war ----------------
+    // Per-floor fog shapes, in-memory only (resets on server restart).
+    // The renderer draws fog ONLY inside these shapes — empty list means
+    // the map is fully visible (default-open). The DM "lays down fog"
+    // by dragging rectangles where they want concealment.
+    const ensureFogBucket = (battlemap) => {
+      if (!battlemap.fogByImage) battlemap.fogByImage = {};
+      const imageId = battlemap.activeImageId;
+      if (!imageId) return null;
+      if (!Array.isArray(battlemap.fogByImage[imageId])) {
+        battlemap.fogByImage[imageId] = [];
+      }
+      return battlemap.fogByImage[imageId];
+    };
+
+    socket.on('fog:add-area', (payload, ack) => {
+      if (!ensureBattlemapMutator('fog:add-area', ack)) return;
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'no-active-battlemap' });
+        return;
+      }
+      const bucket = ensureFogBucket(battlemap);
+      if (!bucket) {
+        respond(ack, { ok: false, error: 'no-active-image' });
+        return;
+      }
+      const shape = sanitizeFogShape(payload?.shape);
+      if (!shape) {
+        respond(ack, { ok: false, error: 'invalid-shape' });
+        return;
+      }
+      bucket.push(shape);
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+    });
+
+    socket.on('fog:remove-area', (payload, ack) => {
+      if (!ensureBattlemapMutator('fog:remove-area', ack)) return;
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'no-active-battlemap' });
+        return;
+      }
+      const bucket = ensureFogBucket(battlemap);
+      const id = typeof payload?.id === 'string' ? payload.id : '';
+      if (bucket && id) {
+        const idx = bucket.findIndex((s) => s.id === id);
+        if (idx >= 0) bucket.splice(idx, 1);
+      }
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+    });
+
+    socket.on('fog:update-area', (payload, ack) => {
+      if (!ensureBattlemapMutator('fog:update-area', ack)) return;
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'no-active-battlemap' });
+        return;
+      }
+      const bucket = ensureFogBucket(battlemap);
+      const id = typeof payload?.id === 'string' ? payload.id : '';
+      const updates = (payload?.updates && typeof payload.updates === 'object') ? payload.updates : null;
+      if (bucket && id && updates) {
+        const idx = bucket.findIndex((s) => s.id === id);
+        if (idx >= 0) {
+          // sanitizeFogShape clamps and validates; we feed it the merged
+          // result so it ignores any malformed fields the client sent.
+          const sanitized = sanitizeFogShape({ ...bucket[idx], ...updates, id });
+          if (sanitized) bucket[idx] = sanitized;
+        }
+      }
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+    });
+
+    socket.on('fog:clear', (payload, ack) => {
+      if (!ensureBattlemapMutator('fog:clear', ack)) return;
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'no-active-battlemap' });
+        return;
+      }
+      const bucket = ensureFogBucket(battlemap);
+      if (bucket) bucket.length = 0;
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+    });
+
+    // ---------------- Soundboard ----------------
+    // The library of clips lives on the dashboard's localStorage; the server
+    // only relays the "play this URL now" broadcast so phones in the room can
+    // join the audio. URL is sanitised to reject data:/file:/javascript:.
+    socket.on('soundboard:play', (payload) => {
+      if (!userData?.isDisplay) return;
+      const url = sanitizeAssetUrl(payload?.url);
+      if (!url) return;
+      const name = typeof payload?.name === 'string' ? payload.name.slice(0, 80) : '';
+      const loop = Boolean(payload?.loop);
+      broadcastToActive('soundboard:played', { url, name, loop });
+    });
+
+    socket.on('soundboard:stop', () => {
+      if (!userData?.isDisplay) return;
+      broadcastToActive('soundboard:stopped', {});
+    });
+
+    // ---------------- Initiative tracker ----------------
+    // In-memory only; resets when the server restarts. Lives on the active
+    // battlemap so a map switch wipes it (matches the "scene reset" model).
+    const ensureInitiativeState = (battlemap) => {
+      if (!battlemap.initiative) {
+        battlemap.initiative = { entries: [], currentIndex: -1, round: 0 };
+      }
+      return battlemap.initiative;
+    };
+    const sanitizeInitiativeEntry = (e) => {
+      if (!e || typeof e !== 'object') return null;
+      const tokenId = typeof e.tokenId === 'string' ? e.tokenId.trim() : '';
+      if (!tokenId) return null;
+      const score = typeof e.score === 'number' && Number.isFinite(e.score) ? e.score : 0;
+      const name = typeof e.name === 'string' ? e.name.slice(0, 40) : '';
+      return { tokenId, score, name };
+    };
+    const broadcastInitiative = (battlemap) => {
+      const state = ensureInitiativeState(battlemap);
+      const sorted = [...state.entries].sort((a, b) => b.score - a.score);
+      broadcastToActive('initiative:updated', {
+        battlemapId: battlemap.id,
+        entries: sorted,
+        currentIndex: state.currentIndex,
+        round: state.round,
+      });
+    };
+
+    socket.on('initiative:set-entries', (payload, ack) => {
+      if (!ensureBattlemapMutator('initiative:set-entries', ack)) return;
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'no-active-battlemap' });
+        return;
+      }
+      const incoming = Array.isArray(payload?.entries) ? payload.entries : [];
+      const entries = incoming.map(sanitizeInitiativeEntry).filter(Boolean);
+      const state = ensureInitiativeState(battlemap);
+      state.entries = entries;
+      state.currentIndex = entries.length > 0 ? 0 : -1;
+      state.round = entries.length > 0 ? 1 : 0;
+      respond(ack, { ok: true });
+      broadcastInitiative(battlemap);
+    });
+
+    socket.on('initiative:advance', (payload, ack) => {
+      if (!ensureBattlemapMutator('initiative:advance', ack)) return;
+      const direction = payload?.direction === 'prev' ? -1 : 1;
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'no-active-battlemap' });
+        return;
+      }
+      const state = ensureInitiativeState(battlemap);
+      if (state.entries.length === 0) {
+        respond(ack, { ok: true });
+        return;
+      }
+      const nextIndex = state.currentIndex + direction;
+      if (nextIndex >= state.entries.length) {
+        state.currentIndex = 0;
+        state.round += 1;
+      } else if (nextIndex < 0) {
+        state.currentIndex = state.entries.length - 1;
+        state.round = Math.max(1, state.round - 1);
+      } else {
+        state.currentIndex = nextIndex;
+      }
+      respond(ack, { ok: true });
+      broadcastInitiative(battlemap);
+    });
+
+    socket.on('initiative:reset', (payload, ack) => {
+      if (!ensureBattlemapMutator('initiative:reset', ack)) return;
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'no-active-battlemap' });
+        return;
+      }
+      const state = ensureInitiativeState(battlemap);
+      state.entries = [];
+      state.currentIndex = -1;
+      state.round = 0;
+      respond(ack, { ok: true });
+      broadcastInitiative(battlemap);
+    });
+
+    // Send initiative on connect so a late-joining client gets caught up.
+    socket.on('initiative:request', (payload, ack) => {
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: true, state: { entries: [], currentIndex: -1, round: 0 } });
+        return;
+      }
+      const state = ensureInitiativeState(battlemap);
+      respond(ack, {
+        ok: true,
+        state: {
+          battlemapId: battlemap.id,
+          entries: [...state.entries].sort((a, b) => b.score - a.score),
+          currentIndex: state.currentIndex,
+          round: state.round,
+        },
+      });
+    });
+
+    socket.on('battlemap:update-spawn-area', (payload, ack) => {
+      if (!ensureBattlemapMutator('battlemap:update-spawn-area', ack)) {
+        return;
+      }
+      const battlemapId = payload?.battlemapId;
+      const battlemap = getBattlemapOrRespond(battlemapId, ack);
+      if (!battlemap) return;
+
+      battlemap.spawnArea = sanitizeSpawnArea(payload?.spawnArea);
+      logEvent('Updated spawn area for', battlemap.id, battlemap.spawnArea);
+      respond(ack, { ok: true });
+      emitBattlemapUpdate(battlemap.id);
+      if (supportsBattlemapSpawnArea) {
+        runBackgroundTask('update battlemap spawn area', () => updateBattlemapRow(battlemap.id));
+      }
+    });
+
     socket.on('battlemap:update-grid-data', (payload, ack) => {
       if (!ensureBattlemapMutator('battlemap:update-grid-data', ack)) {
         return;
@@ -1297,160 +1833,81 @@ app.prepare().then(async () => {
       });
 
       if (battlemapState.activeBattlemapId === battlemap.id) {
+        const previousId = battlemap.id;
         ensureActiveBattlemap();
+        moveSocketsToActiveBattlemapRoom(previousId);
         broadcastActiveBattlemap();
+        resetTokensForActiveBattlemap().catch((err) => {
+          console.error('[Battlemap reset] failed', err);
+        });
       }
     });
 
-    socket.on('battlemap:add-cover', (payload, ack) => {
-      if (!ensureBattlemapMutator('battlemap:add-cover', ack)) {
-        return;
-      }
-
-      const battlemapId = payload?.battlemapId;
-      const battlemap = getBattlemapOrRespond(battlemapId, ack);
-      if (!battlemap) {
-        return;
-      }
-
-      const requestedImageId = payload?.battlemapImageId || payload?.imageId || null;
-      if (supportsBattlemapImages) {
-        ensureBattlemapHasAtLeastOneImage(battlemap);
-      }
-
-      const coverInput = payload?.cover || {};
-      const coverId =
-        typeof coverInput.id === 'string' && coverInput.id.trim() !== ''
-          ? coverInput.id
-          : generateCoverId();
-      const sanitized = sanitizeCover({ ...coverInput, id: coverId });
-      if (supportsBattlemapCoverImageId && battlemap.activeImageId) {
-        const effectiveImageId =
-          typeof requestedImageId === 'string' && requestedImageId.trim() !== ''
-            ? requestedImageId
-            : battlemap.activeImageId;
-        const key = `${effectiveImageId}:${sanitized.id}`;
-        battlemap.covers.set(key, { ...sanitized, _imageId: effectiveImageId });
-      } else {
-        battlemap.covers.set(sanitized.id, sanitized);
-      }
-
-      logEvent('Added cover', sanitized.id, 'to', battlemap.id);
-      respond(ack, { ok: true, coverId: sanitized.id });
-      emitBattlemapUpdate(battlemap.id);
-      runBackgroundTask('upsert cover', () => {
-        const imageIdToPersist =
-          supportsBattlemapCoverImageId && battlemap.activeImageId
-            ? (typeof requestedImageId === 'string' && requestedImageId.trim() !== ''
-                ? requestedImageId
-                : battlemap.activeImageId)
-            : null;
-        return upsertCoverRow(battlemap.id, sanitized, imageIdToPersist);
-      });
-    });
-
-    socket.on('battlemap:update-cover', (payload, ack) => {
-      if (!ensureBattlemapMutator('battlemap:update-cover', ack)) {
-        return;
-      }
-
-      const battlemapId = payload?.battlemapId;
-      const coverId = payload?.coverId;
-      const battlemap = getBattlemapOrRespond(battlemapId, ack);
-      if (!battlemap) {
-        return;
-      }
-
-      const requestedImageId = payload?.battlemapImageId || payload?.imageId || null;
-      const entry = coverId ? findCoverEntry(battlemap, coverId, requestedImageId) : null;
-      if (!entry || !entry.existing) {
-        respond(ack, { ok: false, error: 'cover-not-found' });
-        return;
-      }
-
-      const existing = entry.existing;
-      const sanitized = sanitizeCover({ ...existing, ...payload?.updates, id: coverId });
-      if (supportsBattlemapCoverImageId && entry.imageId) {
-        battlemap.covers.set(entry.key, { ...sanitized, _imageId: entry.imageId });
-      } else {
-        battlemap.covers.set(entry.key, sanitized);
-      }
-
-      logEvent('Updated cover', coverId, 'on', battlemap.id);
-      respond(ack, { ok: true });
-      emitBattlemapUpdate(battlemap.id);
-      runBackgroundTask('update cover', () => upsertCoverRow(battlemap.id, sanitized, entry.imageId ?? null));
-    });
-
-    socket.on('battlemap:remove-cover', (payload, ack) => {
-      if (!ensureBattlemapMutator('battlemap:remove-cover', ack)) {
-        return;
-      }
-
-      const battlemapId = payload?.battlemapId;
-      const coverId = payload?.coverId;
-      const battlemap = getBattlemapOrRespond(battlemapId, ack);
-      if (!battlemap) {
-        return;
-      }
-
-      const requestedImageId = payload?.battlemapImageId || payload?.imageId || null;
-      const entry = coverId ? findCoverEntry(battlemap, coverId, requestedImageId) : null;
-      if (!coverId || !entry) {
-        respond(ack, { ok: false, error: 'cover-not-found' });
-        return;
-      }
-
-      battlemap.covers.delete(entry.key);
-
-      logEvent('Removed cover', coverId, 'from', battlemap.id);
-      respond(ack, { ok: true });
-      emitBattlemapUpdate(battlemap.id);
-      runBackgroundTask('delete cover', () => deleteCoverRow(coverId));
-    });
+    // The cover system was removed; fog-of-war is the canonical
+    // "rectangle on the map" feature now. See fog:add-area /
+    // fog:remove-area / fog:update-area / fog:clear above.
 
     // Handle position updates
     socket.on('position-update', (data) => {
       // Support both old format (just position) and new format (tokenId + position)
       let targetUserId = userId;
-      let position;
-      
+      let rawPosition;
+
       if (data && typeof data === 'object' && data.tokenId && data.position) {
-        // New format: { tokenId, position }
         targetUserId = data.tokenId;
-        position = data.position;
+        rawPosition = data.position;
       } else {
-        // Old format: just position (backward compatibility)
-        position = data;
+        rawPosition = data;
       }
 
-      // Find the target user (could be the sender or any other user)
+      // Reject malformed payloads (NaN/Infinity/non-objects) before mutating state.
+      if (!rawPosition || typeof rawPosition !== 'object') return;
+      const x = sanitizePositionComponent(rawPosition.x);
+      const y = sanitizePositionComponent(rawPosition.y);
+      if (x === null || y === null) return;
+      const position = { x, y };
+
       const targetUser = users.get(targetUserId);
-      if (targetUser) {
-        targetUser.position = position;
-        // Broadcast to all clients (including sender) so everyone sees the update
-        socket.broadcast.emit('user-moved', {
-          userId: targetUserId,
-          position,
-        });
-      }
+      if (!targetUser) return;
+      // Players can only move their own token (matched by persistent ID, since
+      // the socketId-keyed tokenId can change across reconnects). DMs can
+      // move any token.
+      const callerIsDm = Boolean(userData?.isDisplay);
+      const callerOwnsTarget =
+        Boolean(userData?.persistentUserId) &&
+        targetUser.persistentUserId === userData.persistentUserId;
+      if (!callerIsDm && !callerOwnsTarget) return;
+
+      targetUser.position = position;
+      broadcastFromSocketToActive(socket, 'user-moved', {
+        userId: targetUserId,
+        position,
+      });
     });
 
     // Handle token image updates
     socket.on('token-image-update', (data) => {
+      if (!data || typeof data !== 'object') return;
       const { tokenId, imageSrc } = data;
-      if (!tokenId) return;
+      if (typeof tokenId !== 'string' || tokenId.trim() === '') return;
 
-      // Find the target user
+      // Reject data:/file:/javascript: and any URL we don't recognise as same-origin or http(s).
+      const sanitizedImageSrc = sanitizeAssetUrl(imageSrc);
+
       const targetUser = users.get(tokenId);
-      if (targetUser) {
-        targetUser.imageSrc = imageSrc || null;
-        // Broadcast to all clients (including sender) so everyone sees the update
-        io.emit('token-image-updated', {
-          userId: tokenId,
-          imageSrc: imageSrc || null,
-        });
-      }
+      if (!targetUser) return;
+      // Players can only set their own token's art; DM can set any.
+      const callerIsDm = Boolean(userData?.isDisplay);
+      const callerOwnsTarget =
+        Boolean(userData?.persistentUserId) &&
+        targetUser.persistentUserId === userData.persistentUserId;
+      if (!callerIsDm && !callerOwnsTarget) return;
+
+      targetUser.imageSrc = sanitizedImageSrc;
+      broadcastToActive('token-image-updated', {
+        userId: tokenId,
+        imageSrc: sanitizedImageSrc,
+      });
     });
 
     // Handle token size updates (display mode only)
@@ -1485,7 +1942,7 @@ app.prepare().then(async () => {
         }
       }
 
-      io.emit('token-size-updated', {
+      broadcastToActive('token-size-updated', {
         userId: tokenId,
         size: nextSize,
       });
@@ -1513,7 +1970,7 @@ app.prepare().then(async () => {
         disconnectedUsers.set(persistentId, disconnectedUserData);
         users.delete(userId);
         // Broadcast to all other clients with color and position
-        socket.broadcast.emit('user-disconnected', {
+        broadcastFromSocketToActive(socket, 'user-disconnected', {
           userId,
           persistentUserId: persistentId,
           color: user.color,
@@ -1551,143 +2008,46 @@ app.prepare().then(async () => {
           }
         }
         
-        // Broadcast removal to all clients
-        io.emit('token-removed', { persistentUserId: data.persistentUserId });
+        // Broadcast removal to clients on the active battlemap.
+        broadcastToActive('token-removed', { persistentUserId: data.persistentUserId });
       }
     });
 
     // Handle adding a new token (colored token, not a user)
     socket.on('add-token', (data) => {
+      if (!data || typeof data !== 'object') return;
+      // Only DM surfaces (display/dashboard) can spawn tokens.
+      if (!userData?.isDisplay) return;
       const { color, position, size, imageSrc } = data;
-      // Generate a unique ID for this token
       const tokenId = `token-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
       const persistentTokenId = `token-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-      
-      // Create token data (treating it like a user for consistency)
+
       const tokenData = {
         id: tokenId,
         persistentUserId: persistentTokenId,
-        color: color || getRandomColor(),
-        position: position || { x: 50, y: 50 },
+        color: sanitizeHexColor(color, getRandomColor()),
+        position: sanitizePosition(position),
         size: sanitizeTokenSize(size),
-        imageSrc: typeof imageSrc === 'string' ? imageSrc : null,
-        isDisplay: false, // Tokens are not display mode users
+        imageSrc: sanitizeAssetUrl(imageSrc),
+        isDisplay: false,
       };
 
-      // Add to users map (tokens are treated as users in the system)
       users.set(tokenId, tokenData);
 
-      // Broadcast new token to all clients
-      io.emit('token-added', {
+      broadcastToActive('token-added', {
         userId: tokenId,
         persistentUserId: persistentTokenId,
         color: tokenData.color,
         position: tokenData.position,
         size: tokenData.size,
-        imageSrc: tokenData.imageSrc || null,
+        imageSrc: tokenData.imageSrc,
       });
     });
 
-    socket.on('add-cover', (data) => {
-      if (!data) return;
-      const { id: incomingId, x, y, width, height, color } = data;
-
-      if (
-        typeof x !== 'number' ||
-        typeof y !== 'number' ||
-        typeof width !== 'number' ||
-        typeof height !== 'number'
-      ) {
-        return;
-      }
-
-      const id =
-        typeof incomingId === 'string' && incomingId.trim() !== ''
-          ? incomingId
-          : `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-      const sanitizedWidth = clamp(width, 0, 100);
-      const sanitizedHeight = clamp(height, 0, 100);
-      const maxX = 100 - sanitizedWidth;
-      const maxY = 100 - sanitizedHeight;
-
-      const cover = {
-        id,
-        x: clamp(x, 0, maxX),
-        y: clamp(y, 0, maxY),
-        width: sanitizedWidth,
-        height: sanitizedHeight,
-        color: typeof color === 'string' ? color : '#808080',
-      };
-
-      covers.set(id, cover);
-      io.emit('cover-added', cover);
-    });
-
-    socket.on('remove-cover', (data) => {
-      const id = data?.id;
-      if (typeof id !== 'string') {
-        return;
-      }
-
-      if (covers.delete(id)) {
-        io.emit('cover-removed', { id });
-      }
-    });
-
-    socket.on('update-cover', (data) => {
-      const id = data?.id;
-      if (typeof id !== 'string') {
-        return;
-      }
-
-      const cover = covers.get(id);
-      if (!cover) {
-        return;
-      }
-
-      const updates = {};
-
-      if (typeof data.x === 'number') {
-        updates.x = data.x;
-      }
-      if (typeof data.y === 'number') {
-        updates.y = data.y;
-      }
-      if (typeof data.width === 'number') {
-        updates.width = clamp(data.width, 0, 100);
-      }
-      if (typeof data.height === 'number') {
-        updates.height = clamp(data.height, 0, 100);
-      }
-      if (typeof data.color === 'string') {
-        updates.color = data.color;
-      }
-
-      const nextWidth = updates.width ?? cover.width;
-      const nextHeight = updates.height ?? cover.height;
-      const maxX = 100 - nextWidth;
-      const maxY = 100 - nextHeight;
-
-      const nextCover = {
-        ...cover,
-        ...updates,
-      };
-
-      if (typeof updates.x === 'number') {
-        nextCover.x = clamp(updates.x, 0, maxX);
-      } else {
-        nextCover.x = clamp(nextCover.x, 0, maxX);
-      }
-
-      if (typeof updates.y === 'number') {
-        nextCover.y = clamp(updates.y, 0, maxY);
-      } else {
-        nextCover.y = clamp(nextCover.y, 0, maxY);
-      }
-
-      covers.set(id, nextCover);
-      io.broadcast.emit('cover-updated', nextCover);
-    });
+    // Legacy global cover handlers (add-cover/remove-cover/update-cover) were
+    // removed in favour of the battlemap-scoped variants
+    // (battlemap:add-cover/update-cover/remove-cover) which persist to Supabase
+    // and respect floor (battlemap_image) scoping.
   });
 
   httpServer

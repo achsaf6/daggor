@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { Position, ImageBounds, TokenSize } from "../../types";
 import {
   getViewportPosition,
@@ -162,6 +162,36 @@ export const Token = ({
   // Only apply custom z-index after mount to prevent hydration mismatch
   const zIndexClass = isMounted && zIndex === 20 ? "z-20" : "z-10";
 
+  const style = useMemo<React.CSSProperties>(
+    () => ({
+      left: `${viewportPos.x}%`,
+      top: `${viewportPos.y}%`,
+      width: `${tokenSize}%`,
+      aspectRatio: "1 / 1",
+      transform: "translate(-50%, -50%)",
+      backgroundColor: displayedImageSrc ? undefined : color,
+      backgroundImage: displayedImageSrc ? `url(${displayedImageSrc})` : undefined,
+      backgroundSize: displayedImageSrc ? "cover" : undefined,
+      backgroundPosition: displayedImageSrc ? "center" : undefined,
+      backgroundRepeat: displayedImageSrc ? "no-repeat" : undefined,
+      touchAction: isInteractive ? "none" : "auto",
+      opacity,
+      userSelect: "none",
+      WebkitUserSelect: "none",
+      MozUserSelect: "none",
+      msUserSelect: "none",
+    }),
+    [
+      viewportPos.x,
+      viewportPos.y,
+      tokenSize,
+      displayedImageSrc,
+      color,
+      isInteractive,
+      opacity,
+    ]
+  );
+
   return (
     <div
       className={`absolute rounded-full border border-white md:border-2 shadow-lg ${zIndexClass} ${
@@ -169,28 +199,13 @@ export const Token = ({
       }`}
       title={title}
       draggable={false}
-      style={{
-        left: `${viewportPos.x}%`,
-        top: `${viewportPos.y}%`,
-        width: `${tokenSize}%`,
-        aspectRatio: "1 / 1",
-        transform: "translate(-50%, -50%)",
-        backgroundColor: displayedImageSrc ? undefined : color,
-        backgroundImage: displayedImageSrc ? `url(${displayedImageSrc})` : undefined,
-        backgroundSize: displayedImageSrc ? "cover" : undefined,
-        backgroundPosition: displayedImageSrc ? "center" : undefined,
-        backgroundRepeat: displayedImageSrc ? "no-repeat" : undefined,
-        touchAction: isInteractive ? "none" : "auto",
-        opacity: opacity,
-        userSelect: "none",
-        WebkitUserSelect: "none",
-        MozUserSelect: "none",
-        msUserSelect: "none",
-      }}
+      style={style}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
       onClick={onClick}
       onContextMenu={onContextMenu}
+      data-testid="token"
+      data-token-color={color}
     >
       {children}
     </div>

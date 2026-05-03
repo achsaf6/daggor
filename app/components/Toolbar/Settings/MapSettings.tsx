@@ -54,24 +54,19 @@ export const MapSettings = ({
 
   return (
     <div onClick={(e) => e.stopPropagation()}>
-      <h3 className="text-white text-sm font-semibold mb-4">Settings</h3>
-      
-      {/* Grid Size Slider */}
+      <h3 className="parchment-heading text-sm mb-1">Settings</h3>
+      <div className="parchment-rule mb-4" />
+
       <div className="mb-4">
-        <GridSizeSlider
-          value={gridScale}
-          onChange={onGridScaleChange}
-        />
+        <GridSizeSlider value={gridScale} onChange={onGridScaleChange} />
       </div>
 
-      {/* Horizontal Squares Input */}
       <HorizontalSquaresInput
         gridScale={gridScale}
         onGridScaleChange={onGridScaleChange}
         gridData={gridData}
       />
 
-      {/* Grid Offset Joystick */}
       <div className="mb-4">
         <GridOffsetJoystick
           offsetX={gridOffsetX}
@@ -80,19 +75,23 @@ export const MapSettings = ({
         />
       </div>
 
-      {/* Delete Battlemap */}
       {currentBattlemap ? (
-        <div className="mb-4 border-t border-white/10 pt-4">
+        <div className="mb-1 pt-4" style={{ borderTop: "1px solid rgba(110, 83, 32, 0.3)" }}>
           <button
             type="button"
             onClick={handleDeleteBattlemap}
             disabled={disabled}
-            className="w-full bg-red-900/40 hover:bg-red-900/60 border border-red-500/40 rounded-md px-2 py-2 text-white text-sm font-medium transition disabled:opacity-50"
+            className="parchment-numeric w-full px-3 py-2 text-sm border transition-colors disabled:opacity-50 hover:bg-[rgba(166,49,49,0.18)]"
+            style={{
+              color: "#7a2424",
+              borderColor: "#7a2424",
+              background: "rgba(166, 49, 49, 0.08)",
+            }}
           >
-            Delete Battlemap
+            DELETE BATTLEMAP
           </button>
           {statusMessage ? (
-            <div className="text-xs text-white/50 mt-2">{statusMessage}</div>
+            <div className="parchment-flavor text-xs mt-2" style={{ color: "var(--parchment-ink-muted)" }}>{statusMessage}</div>
           ) : null}
         </div>
       ) : null}

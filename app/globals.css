@@ -41,6 +41,293 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  --font-display: var(--font-cinzel);
+
+  /* Motion tokens (Material 3 standard, restrained intensity).
+     Surface ↔ duration scaling: small UI 80–150ms, panels 180–250ms,
+     larger surfaces up to 320ms. Long values (cinematic) reserved for
+     fog reveal on the projector and not used elsewhere. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0, 1);
+  --dur-instant: 80ms;
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 320ms;
+  --dur-cinematic: 500ms;
+}
+
+/* Theatrical aesthetic on a dark base. Surfaces carry a subtle warm hue
+   (chroma 0.012 at hue ~60) so the whole UI reads as candlelit rather
+   than fluorescent. Brand is parchment-amber (#D4A04A) instead of burnt
+   orange. Motion stays restrained — atmosphere is achieved via color
+   and glow, not animation. */
+:root {
+  --radius: 0.625rem;
+
+  /* Surfaces — warm-tinted near-black so panels feel candle-lit. */
+  --background: oklch(0.13 0.012 60);
+  --foreground: oklch(0.97 0.005 80);
+
+  --card: oklch(0.18 0.012 60);
+  --card-foreground: oklch(0.97 0.005 80);
+
+  --popover: oklch(0.18 0.012 60);
+  --popover-foreground: oklch(0.97 0.005 80);
+
+  --secondary: oklch(0.22 0.012 60);
+  --secondary-foreground: oklch(0.97 0.005 80);
+
+  --muted: oklch(0.22 0.012 60);
+  --muted-foreground: oklch(0.64 0.012 70);
+
+  --accent: oklch(0.27 0.014 60);
+  --accent-foreground: oklch(0.97 0.005 80);
+
+  /* Brand: parchment amber #D4A04A — gilded trim, candlelit accent.
+     Used for primary actions, current-turn highlight, focus rings. */
+  --primary: oklch(0.74 0.13 80);
+  --primary-foreground: oklch(0.13 0.012 60);
+
+  --destructive: oklch(0.62 0.22 25);
+
+  /* Borders carry a faint amber tint — looks like the panel edges
+     are catching torchlight rather than being pure cold steel. */
+  --border: oklch(0.85 0.05 80 / 0.1);
+  --input: oklch(0.85 0.05 80 / 0.16);
+  --ring: oklch(0.74 0.13 80);
+
+  /* Semantic charts. Chart-1 follows the brand. */
+  --chart-1: oklch(0.74 0.13 80);      /* primary / candlelight */
+  --chart-2: oklch(0.74 0.16 162);     /* success / live  */
+  --chart-3: oklch(0.7 0.16 256);      /* info / mana     */
+  --chart-4: oklch(0.7 0.18 295);      /* warning / fog   */
+  --chart-5: oklch(0.65 0.22 25);      /* danger / hp     */
+
+  --sidebar: oklch(0.16 0.012 60);
+  --sidebar-foreground: oklch(0.97 0.005 80);
+  --sidebar-primary: oklch(0.74 0.13 80);
+  --sidebar-primary-foreground: oklch(0.13 0.012 60);
+  --sidebar-accent: oklch(0.22 0.012 60);
+  --sidebar-accent-foreground: oklch(0.97 0.005 80);
+  --sidebar-border: oklch(0.85 0.05 80 / 0.1);
+  --sidebar-ring: oklch(0.74 0.13 80);
+
+  /* Theatrical-only tokens for ornamentation classes below. */
+  --theatrical-glow: 0 0 0 1px oklch(0.74 0.13 80 / 0.18),
+                     inset 0 1px 0 0 oklch(0.85 0.13 80 / 0.06),
+                     inset 0 0 24px -8px oklch(0.74 0.13 80 / 0.18);
+  --theatrical-vignette:
+    radial-gradient(ellipse at center,
+      transparent 55%,
+      oklch(0.05 0.01 60 / 0.55) 100%);
+}
+
+/* Mirror for shadcn's `.dark` variant. */
+.dark {
+  --background: oklch(0.13 0.012 60);
+  --foreground: oklch(0.97 0.005 80);
+  --card: oklch(0.18 0.012 60);
+  --card-foreground: oklch(0.97 0.005 80);
+  --popover: oklch(0.18 0.012 60);
+  --popover-foreground: oklch(0.97 0.005 80);
+  --secondary: oklch(0.22 0.012 60);
+  --secondary-foreground: oklch(0.97 0.005 80);
+  --muted: oklch(0.22 0.012 60);
+  --muted-foreground: oklch(0.64 0.012 70);
+  --accent: oklch(0.27 0.014 60);
+  --accent-foreground: oklch(0.97 0.005 80);
+  --primary: oklch(0.74 0.13 80);
+  --primary-foreground: oklch(0.13 0.012 60);
+  --destructive: oklch(0.62 0.22 25);
+  --border: oklch(0.85 0.05 80 / 0.1);
+  --input: oklch(0.85 0.05 80 / 0.16);
+  --ring: oklch(0.74 0.13 80);
+  --chart-1: oklch(0.74 0.13 80);
+  --chart-2: oklch(0.74 0.16 162);
+  --chart-3: oklch(0.7 0.16 256);
+  --chart-4: oklch(0.7 0.18 295);
+  --chart-5: oklch(0.65 0.22 25);
+  --sidebar: oklch(0.16 0.012 60);
+  --sidebar-foreground: oklch(0.97 0.005 80);
+  --sidebar-primary: oklch(0.74 0.13 80);
+  --sidebar-primary-foreground: oklch(0.13 0.012 60);
+  --sidebar-accent: oklch(0.22 0.012 60);
+  --sidebar-accent-foreground: oklch(0.97 0.005 80);
+  --sidebar-border: oklch(0.85 0.05 80 / 0.1);
+  --sidebar-ring: oklch(0.74 0.13 80);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* Restrained motion intensity: collapse durations to ~0 for users
+     who request reduced motion. Easing curves still apply (so things
+     don't snap visibly) but everything is essentially instant. */
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --dur-instant: 0ms;
+      --dur-fast: 0ms;
+      --dur-base: 0ms;
+      --dur-slow: 0ms;
+      --dur-cinematic: 0ms;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ─── Expedition 33 — Belle Époque panel system ──────────────────────
+   Replaces the previous "dark theatrical" panel approach. Panels are
+   now CREAM PARCHMENT (like illuminated journal pages) sitting on the
+   dark dashboard. The frame is thin antique-brass linework drawn as a
+   continuous engraved figure — never corner stickers.
+
+   References:
+   - Sandfall Interactive's Clair Obscur: Expedition 33 (2025) UI by
+     Brieuc Inisan. Hand-engraved feel, not gilt.
+   - "The Engraved Plate" + "Nested Frames" from research direction B.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Antique-brass color ramp. Matched to E33 references; muted, not
+   bright. Use these via CSS vars so the SVG frame component can read
+   them through inline style attributes. */
+:root {
+  --brass-shadow: #6e5320;
+  --brass-deep: #a9842f;
+  --brass-mid: #c9a24a;
+  --brass-light: #e6c56e;
+  --brass-spec: #f1d98a;
+
+  --parchment-bright: #efe6d2;
+  --parchment-base: #e8dcc0;
+  --parchment-shadow: #c9b68e;
+  --parchment-ink: #2a211a;
+  --parchment-ink-muted: #5a4a3a;
+}
+
+/* Parchment panel — cream warm-paper background with a subtle paper
+   grain. The frame (border + corners + heading interrupt) is drawn by
+   <PanelFrame /> in a separate layer. */
+.parchment-panel {
+  /* Warm cream base, slightly more saturated at the bottom-right to
+     suggest aged-paper directionality. */
+  background-color: var(--parchment-bright);
+  background-image:
+    radial-gradient(ellipse at top left,
+      transparent 30%,
+      rgba(201, 182, 142, 0.18) 100%),
+    /* Subtle texture bands suggesting laid-paper grain. */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(42, 33, 26, 0.018) 2px,
+      rgba(42, 33, 26, 0.018) 3px
+    );
+  color: var(--parchment-ink);
+}
+
+/* Thin brass rule — used as the section divider that the title text
+   "interrupts." */
+.parchment-rule {
+  height: 1px;
+  background: linear-gradient(to right,
+    transparent,
+    var(--brass-mid) 8%,
+    var(--brass-deep) 50%,
+    var(--brass-mid) 92%,
+    transparent);
+  opacity: 0.85;
+}
+
+/* Section heading — Cinzel uppercase in warm ink, sitting OVER the
+   parchment so when placed on top of a brass rule it interrupts the
+   line (the heading's parchment-color background occludes the rule
+   directly behind the text). This is the "engraved plate" trick. */
+.parchment-heading {
+  font-family: var(--font-cinzel), serif;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--parchment-ink);
+  text-transform: uppercase;
+  line-height: 1.2;
+  /* Tiny embossed-on-paper effect — a soft warm shadow below + a
+     barely-there brass color shift. Not a glow; this is *engraved*. */
+  text-shadow:
+    0 1px 0 rgba(255, 252, 240, 0.6),
+    0 -1px 0 rgba(110, 83, 32, 0.18);
+}
+
+/* Garamond body face — used inside parchment panels for prose. */
+.parchment-body {
+  font-family: var(--font-garamond), serif;
+  color: var(--parchment-ink);
+}
+
+/* Bebas Neue — numeric / HUD labels (initiative scores, position %, counts). */
+.parchment-numeric {
+  font-family: var(--font-bebas), sans-serif;
+  letter-spacing: 0.04em;
+  color: var(--brass-deep);
+}
+
+/* IM Fell — flavor / marginalia / italic notes. */
+.parchment-flavor {
+  font-family: var(--font-imfell), serif;
+  font-style: italic;
+  color: var(--parchment-ink-muted);
+}
+
+/* Tiny brass diamond terminator — drops into corners and as section
+   end-caps. Implemented as a rotated 4×4 px square. */
+.parchment-diamond {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: var(--brass-mid);
+  transform: rotate(45deg);
+  box-shadow: 0 0 0 1px var(--brass-shadow);
+}
+
+/* Display surface vignette wrapper (kept from previous version —
+   used on /display route). */
+.theatrical-vignette {
+  position: relative;
+}
+.theatrical-vignette::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--theatrical-vignette);
+  z-index: 7;
+}
+
+/* Static equalizer bars — used as a "playing" indicator on soundboard
+   clips. Bar heights are intentionally varied for that bar-chart silhouette
+   from the mockup; they don't animate, matching the Restrained direction. */
+.theatrical-eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 18px;
+}
+.theatrical-eq > span {
+  width: 2px;
+  background: var(--brass-deep);
+  border-radius: 1px;
 }
 
 /* Prevent text selection during drag operations */
@@ -56,144 +343,40 @@
   -ms-user-select: none;
 }
 
-:root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-}
+/* ─── Loading screen animations ────────────────────────────────── */
 
 @keyframes rune-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 @keyframes rune-spin-reverse {
-  from {
-    transform: rotate(360deg);
-  }
-  to {
-    transform: rotate(0deg);
-  }
+  from { transform: rotate(360deg); }
+  to   { transform: rotate(0deg); }
 }
 
 @keyframes sigil-glow {
-  0%,
-  100% {
+  0%, 100% {
     transform: scale(0.96) rotate(-1deg);
-    filter: drop-shadow(0 0 1.05rem rgba(255, 140, 140, 0.35));
+    filter: drop-shadow(0 0 1.05rem rgba(220, 175, 90, 0.35));
   }
   50% {
     transform: scale(1.04) rotate(1deg);
-    filter: drop-shadow(0 0 1.65rem rgba(255, 180, 180, 0.55));
+    filter: drop-shadow(0 0 1.65rem rgba(240, 195, 110, 0.55));
   }
 }
 
 @keyframes loading-bar {
-  0% {
-    transform: scaleX(0);
-    opacity: 0.2;
-  }
-  45% {
-    transform: scaleX(1);
-    opacity: 0.9;
-  }
-  100% {
-    transform: scaleX(0);
-    opacity: 0.2;
-  }
+  0%   { transform: scaleX(0); opacity: 0.2; }
+  45%  { transform: scaleX(1); opacity: 0.9; }
+  100% { transform: scaleX(0); opacity: 0.2; }
 }
 
 @keyframes ember-rise {
-  0% {
-    transform: translate3d(0, 0, 0) scale(0.5);
-    opacity: 0;
-  }
-  20% {
-    opacity: 0.7;
-  }
-  65% {
-    opacity: 1;
-  }
-  100% {
-    transform: translate3d(0, -120px, 0) scale(1);
-    opacity: 0;
-  }
+  0%   { transform: translate3d(0, 0, 0) scale(0.5); opacity: 0; }
+  20%  { opacity: 0.7; }
+  65%  { opacity: 1; }
+  100% { transform: translate3d(0, -120px, 0) scale(1); opacity: 0; }
 }
 
 .loading-rune-spin {
@@ -217,4 +400,22 @@
   animation-name: ember-rise;
   animation-timing-function: ease-in-out;
   animation-iteration-count: infinite;
+}
+
+@keyframes loading-bg-drift {
+  0%, 100% { background-position: 0% 0%, 0% 0%, 0% 0%; }
+  50%      { background-position: 30% 50%, 70% 30%, 50% 80%; }
+}
+
+.loading-screen-bg {
+  /* Theatrical amber wash. Same drifting radial gradients, brand-amber tones
+     instead of crimson — matches the rest of the candlelit aesthetic. */
+  background-color: #160d04;
+  background-image:
+    radial-gradient(ellipse at 20% 30%, rgba(184, 130, 40, 0.45), transparent 55%),
+    radial-gradient(ellipse at 80% 60%, rgba(140, 90, 20, 0.55), transparent 60%),
+    radial-gradient(circle at 50% 100%, rgba(40, 22, 4, 0.9), transparent 70%);
+  background-size: 140% 140%, 160% 160%, 200% 200%;
+  background-blend-mode: screen;
+  animation: loading-bg-drift 22s ease-in-out infinite;
 }

@@ -1,14 +1,20 @@
 "use client";
 
 import React, { useCallback, useMemo, useState } from "react";
-import { useViewMode } from "../../hooks/useViewMode";
+import { Surface } from "../../hooks/useSurface";
 import { MapViewDisplay } from "./MapViewDisplay";
 import { MapViewMobile } from "./MapViewMobile";
 import { LoadingScreen } from "./LoadingScreen";
 import { useCharacter } from "../../providers/CharacterProvider";
 
-export const MapView = () => {
-  const { isMobile, isDisplay } = useViewMode();
+interface MapViewProps {
+  surface: Surface;
+}
+
+// Routed entry point. The surface is decided by the URL (see /, /display,
+// /dashboard) and provided via SurfaceProvider higher up the tree; this
+// component just chooses the right view and handles the loading screen.
+export const MapView = ({ surface }: MapViewProps) => {
   const { hasSelectedCharacter } = useCharacter();
   const [isMapReady, setIsMapReady] = useState(false);
   const [hasClickedEnter, setHasClickedEnter] = useState(false);
@@ -21,27 +27,31 @@ export const MapView = () => {
     setHasClickedEnter(true);
   }, []);
 
-  const renderedView = useMemo(() => {
-    if (isDisplay) {
-      return <MapViewDisplay onReadyChange={handleReadyChange} />;
-    }
+  const isMobileSurface = surface === "mobile";
 
-    if (isMobile) {
+  const renderedView = useMemo(() => {
+    if (isMobileSurface) {
       return <MapViewMobile onReadyChange={handleReadyChange} />;
     }
-
-    // Default to display mode during SSR/hydration
     return <MapViewDisplay onReadyChange={handleReadyChange} />;
-  }, [handleReadyChange, isDisplay, isMobile]);
+  }, [handleReadyChange, isMobileSurface]);
 
-  const shouldShowLoadingScreen = !isMapReady || (isMobile && !(hasSelectedCharacter && hasClickedEnter));
-  const loadingScreenReady = isMapReady && (!isMobile || (hasSelectedCharacter && hasClickedEnter));
+  // Mobile players go through a "Who are you?" prompt; DM surfaces skip that.
+  const shouldShowLoadingScreen =
+    !isMapReady || (isMobileSurface && !(hasSelectedCharacter && hasClickedEnter));
+  const loadingScreenReady =
+    isMapReady && (!isMobileSurface || (hasSelectedCharacter && hasClickedEnter));
 
   return (
     <>
-      {shouldShowLoadingScreen && <LoadingScreen isReady={loadingScreenReady} onEnterClick={handleEnterClick} />}
+      {shouldShowLoadingScreen && (
+        <LoadingScreen
+          isReady={loadingScreenReady}
+          onEnterClick={handleEnterClick}
+          showCharacterForm={isMobileSurface}
+        />
+      )}
       {renderedView}
     </>
   );
 };
-
