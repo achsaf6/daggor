@@ -122,6 +122,22 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
 
       setMonsterTemplates(next);
       setIsLoadingTemplates(false);
+
+      // Warm the browser cache so images are ready *before* the DM opens the
+      // picker. Without this, each image fetch triggers on first paint of a
+      // tile (CSS background-image), and the swatches pop in slowly. We use
+      // `new Image()` so the request enters the HTTP cache without disturbing
+      // the DOM. Errors are intentionally swallowed — a missing token icon
+      // shouldn't break the picker.
+      const seen = new Set<string>();
+      next.forEach((tpl) => {
+        const url = tpl.imageUrl;
+        if (!url || seen.has(url)) return;
+        seen.add(url);
+        const img = new Image();
+        img.decoding = "async";
+        img.src = url;
+      });
     };
 
     void fetchMonsters();

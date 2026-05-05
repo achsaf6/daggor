@@ -603,6 +603,125 @@ app.prepare().then(async () => {
     }
   };
 
+  // ---------------- Initiative tracker (outer-scope helpers) ----------------
+  // In-memory only; lives on each battlemap so a map switch wipes it (matches
+  // the "scene reset" model). Order is DM-authoritative — auto-population
+  // appends in arrival order, reorders shuffle in place; we deliberately do
+  // NOT sort by score on broadcast (score is informational, not authoritative).
+  const ensureInitiativeState = (battlemap) => {
+    if (!battlemap.initiative) {
+      battlemap.initiative = { entries: [], currentIndex: -1, round: 0 };
+    }
+    return battlemap.initiative;
+  };
+  const sanitizeInitiativeEntry = (e) => {
+    if (!e || typeof e !== 'object') return null;
+    const tokenId = typeof e.tokenId === 'string' ? e.tokenId.trim() : '';
+    if (!tokenId) return null;
+    const score = typeof e.score === 'number' && Number.isFinite(e.score) ? e.score : 0;
+    const name = typeof e.name === 'string' ? e.name.slice(0, 40) : '';
+    return { tokenId, score, name };
+  };
+  const broadcastInitiative = (battlemap) => {
+    const state = ensureInitiativeState(battlemap);
+    broadcastToActive('initiative:updated', {
+      battlemapId: battlemap.id,
+      entries: state.entries,
+      currentIndex: state.currentIndex,
+      round: state.round,
+    });
+  };
+  // tokenId is the persistentUserId (stable across socket reconnects for
+  // players, the generated persistent id for NPCs).
+  const ensureInitiativeMember = (battlemap, tokenId, name) => {
+    if (!battlemap || !tokenId) return false;
+    const state = ensureInitiativeState(battlemap);
+    const existing = state.entries.find((e) => e.tokenId === tokenId);
+    if (existing) {
+      if (typeof name === 'string' && name && existing.name !== name) {
+        existing.name = name.slice(0, 40);
+        return true;
+      }
+      return false;
+    }
+    state.entries.push({ tokenId, score: 0, name: typeof name === 'string' ? name.slice(0, 40) : '' });
+    if (state.currentIndex < 0) {
+      state.currentIndex = 0;
+      state.round = 1;
+    }
+    return true;
+  };
+  const removeInitiativeMember = (battlemap, tokenId) => {
+    if (!battlemap || !tokenId) return false;
+    const state = ensureInitiativeState(battlemap);
+    const idx = state.entries.findIndex((e) => e.tokenId === tokenId);
+    if (idx < 0) return false;
+    state.entries.splice(idx, 1);
+    if (state.entries.length === 0) {
+      state.currentIndex = -1;
+      state.round = 0;
+    } else if (idx < state.currentIndex) {
+      state.currentIndex -= 1;
+    } else if (state.currentIndex >= state.entries.length) {
+      state.currentIndex = 0;
+    }
+    return true;
+  };
+  const renameInitiativeMember = (battlemap, tokenId, name) => {
+    if (!battlemap || !tokenId) return false;
+    const state = ensureInitiativeState(battlemap);
+    const entry = state.entries.find((e) => e.tokenId === tokenId);
+    if (!entry) return false;
+    const next = typeof name === 'string' ? name.slice(0, 40) : '';
+    if (entry.name === next) return false;
+    entry.name = next;
+    return true;
+  };
+  // Reorder existing entries by tokenId list. Unknown ids are ignored,
+  // missing ids drop to the end so partial reorders are tolerable.
+  const reorderInitiative = (battlemap, orderedTokenIds) => {
+    if (!battlemap || !Array.isArray(orderedTokenIds)) return false;
+    const state = ensureInitiativeState(battlemap);
+    if (state.entries.length === 0) return false;
+    const byId = new Map(state.entries.map((e) => [e.tokenId, e]));
+    const seen = new Set();
+    const next = [];
+    for (const id of orderedTokenIds) {
+      if (typeof id !== 'string') continue;
+      const entry = byId.get(id);
+      if (!entry || seen.has(id)) continue;
+      next.push(entry);
+      seen.add(id);
+    }
+    for (const entry of state.entries) {
+      if (!seen.has(entry.tokenId)) next.push(entry);
+    }
+    if (next.length === state.entries.length && next.every((e, i) => e === state.entries[i])) {
+      return false;
+    }
+    state.entries = next;
+    if (state.currentIndex >= 0 && state.currentIndex < state.entries.length) {
+      // currentIndex may now point at a different entry — leave the cursor
+      // where the DM left it (acting on position, not identity).
+    }
+    return true;
+  };
+  const setInitiativeScore = (battlemap, tokenId, score) => {
+    if (!battlemap || !tokenId) return false;
+    const state = ensureInitiativeState(battlemap);
+    const entry = state.entries.find((e) => e.tokenId === tokenId);
+    if (!entry) return false;
+    const next = typeof score === 'number' && Number.isFinite(score) ? score : 0;
+    if (entry.score === next) return false;
+    entry.score = next;
+    return true;
+  };
+  const mutateActiveInitiative = (mutator) => {
+    const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+    if (!battlemap) return;
+    if (mutator(battlemap)) broadcastInitiative(battlemap);
+  };
+
   // Drop every active token (player + DM-spawned) and every disconnected
   // entry, then re-seat connected, non-DM sockets into spawn-area cells on the
   // new active battlemap. Called when the active battlemap changes — players
@@ -622,6 +741,15 @@ app.prepare().then(async () => {
     // 2. Re-seat each connected non-DM socket. Use spawn area from the new
     // battlemap, distributed across distinct cells.
     const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+    // Wipe any stale initiative state on the destination battlemap — entries
+    // may reference persistentUserIds that aren't present anymore. The
+    // re-seat loop below repopulates from currently-connected sockets.
+    if (battlemap) {
+      const initState = ensureInitiativeState(battlemap);
+      initState.entries = [];
+      initState.currentIndex = -1;
+      initState.round = 0;
+    }
     const spawnArea = sanitizeSpawnArea(battlemap?.spawnArea);
     let connectedSockets;
     try {
@@ -631,8 +759,13 @@ app.prepare().then(async () => {
       return;
     }
     const playerSockets = connectedSockets.filter((s) => {
-      // displayModeUsers and absent userData both mean "not a re-seatable player".
-      return !displayModeUsers.has(s.id);
+      // displayModeUsers and absent userData both mean "not a re-seatable
+      // player". BattlemapProvider companion sockets are flagged
+      // claimsPresence=false in initializeUser; without this they'd be
+      // re-seated and a single player would end up with two tokens.
+      if (displayModeUsers.has(s.id)) return false;
+      if (s.data && s.data.claimsPresence === false) return false;
+      return true;
     });
     const positions = pickSpawnPositions(spawnArea, playerSockets.length);
 
@@ -645,6 +778,7 @@ app.prepare().then(async () => {
       const persistentId = s.data?.persistentUserId || stored?.persistentUserId || s.id;
       const color = s.data?.color || getRandomColor();
       const size = sanitizeTokenSize(s.data?.size);
+      const name = s.data?.name ?? null;
       const position = positions[i] ?? { x: 50, y: 50 };
       const userData = {
         id: s.id,
@@ -653,12 +787,13 @@ app.prepare().then(async () => {
         position,
         size,
         imageSrc: s.data?.imageSrc || null,
+        name,
         surface: s.data?.surface || 'mobile',
         isDisplay: false,
       };
       users.set(s.id, userData);
       // Remember on the socket so future reconnects can restore.
-      s.data = { ...(s.data || {}), persistentUserId: persistentId, color, size };
+      s.data = { ...(s.data || {}), persistentUserId: persistentId, color, size, name };
       // Tell each player their own new position, and broadcast to others.
       s.emit('user-connected', {
         userId: s.id,
@@ -667,6 +802,7 @@ app.prepare().then(async () => {
         position,
         imageSrc: userData.imageSrc,
         size,
+        name,
       });
       broadcastFromSocketToActive(s, 'user-joined', {
         userId: s.id,
@@ -675,12 +811,17 @@ app.prepare().then(async () => {
         position,
         imageSrc: userData.imageSrc,
         size,
+        name,
       });
+      // The new battlemap starts with an empty initiative tracker; seed each
+      // re-seated player so the panel doesn't appear suddenly empty.
+      if (battlemap) ensureInitiativeMember(battlemap, persistentId, name || '');
     });
     // Re-broadcast the full active list to each player so everyone sees the
     // freshly-seated cohort consistently.
     const activeList = Array.from(users.values()).filter((u) => !u.isDisplay);
     io.to(battlemapRoom(battlemapState.activeBattlemapId)).emit('all-users', activeList);
+    if (battlemap) broadcastInitiative(battlemap);
   };
 
   // Move every connected socket from the old battlemap room to the new one.
@@ -973,11 +1114,70 @@ app.prepare().then(async () => {
       const persistentUserId = incomingPersistentId || userId;
       let restoredUserData = null;
 
-      // Check if this user was previously disconnected (in-memory only)
-      const match = findDisconnectedUser(persistentUserId, incomingPersistentId ? null : userId);
-      if (match) {
-        restoredUserData = match.value;
-        disconnectedUsers.delete(match.key);
+      // Surface = which route the client is on: 'mobile' (player), 'display'
+      // (projector), or 'dashboard' (DM control panel). Dashboard and display
+      // are DM-trusted; only dashboard is allowed to mutate battlemap structure.
+      const VALID_SURFACES = new Set(['mobile', 'display', 'dashboard']);
+      const surface = VALID_SURFACES.has(data?.surface)
+        ? data.surface
+        : (data?.isDisplay ? 'display' : 'mobile');
+      const isDisplay = surface === 'display' || surface === 'dashboard';
+      const suppressPresence = Boolean(data?.suppressPresence);
+      // Only the dashboard is allowed to mutate battlemap structure. Display
+      // and mobile clients can request mutations but the server refuses.
+      const allowBattlemapMutations = surface === 'dashboard';
+
+      // Takeover/restoration only applies to mobile presence sockets (those
+      // claim an entry in `users`). DM surfaces (display/dashboard) and
+      // suppressPresence companion sockets — e.g. BattlemapProvider opens its
+      // own socket alongside useSocket — must NOT clobber a player's session
+      // just because they happen to share localStorage. Without this guard,
+      // BattlemapProvider's identify would kick the player's own useSocket
+      // (same persistentUserId) moments after it joined.
+      const claimsPresence = !isDisplay && !suppressPresence;
+
+      // Takeover: a fresh socket carrying a persistentUserId that already
+      // matches an active user is a reconnection while the old socket is
+      // still considered alive. Mobile radios drop TCP without firing FIN,
+      // so the server can sit on a zombie socket for a while. Most-recent-
+      // wins: kick the old one and inherit its color/position/size. The
+      // old socket's disconnect handler is gated by `takenOverBy` so it
+      // does not park the user in disconnectedUsers — we are replacing,
+      // not parking.
+      if (claimsPresence && incomingPersistentId) {
+        for (const [oldUserId, oldUser] of users.entries()) {
+          if (oldUser.persistentUserId !== incomingPersistentId) continue;
+          if (oldUserId === userId) continue;
+          restoredUserData = {
+            color: oldUser.color,
+            position: oldUser.position,
+            imageSrc: oldUser.imageSrc || null,
+            size: oldUser.size,
+          };
+          users.delete(oldUserId);
+          // Observers keyed otherUsers by oldUserId from the original
+          // user-joined. user-reconnected adds the new socket id but doesn't
+          // remove the stale one, and the suppressed user-disconnected won't
+          // either — without this, every other client renders a ghost token.
+          broadcastToActive('user-left', { userId: oldUserId });
+          const oldSocket = io.sockets.sockets.get(oldUserId);
+          if (oldSocket) {
+            oldSocket.data = { ...(oldSocket.data || {}), takenOverBy: userId };
+            oldSocket.disconnect(true);
+          }
+          logEvent('Takeover: persistentId', incomingPersistentId, 'reassigned from', oldUserId, 'to', userId);
+          break;
+        }
+      }
+
+      // Check if this user was previously disconnected (in-memory only).
+      // Same gate: only mobile presence sockets should consume a parked entry.
+      if (claimsPresence && !restoredUserData) {
+        const match = findDisconnectedUser(persistentUserId, incomingPersistentId ? null : userId);
+        if (match) {
+          restoredUserData = match.value;
+          disconnectedUsers.delete(match.key);
+        }
       }
 
       // Use restored data or create new user
@@ -993,19 +1193,12 @@ app.prepare().then(async () => {
         position = positions[existingCount] ?? { x: spawn.x + spawn.width / 2, y: spawn.y + spawn.height / 2 };
       }
       const size = sanitizeTokenSize(restoredUserData?.size);
-
-      // Surface = which route the client is on: 'mobile' (player), 'display'
-      // (projector), or 'dashboard' (DM control panel). Dashboard and display
-      // are DM-trusted; only dashboard is allowed to mutate battlemap structure.
-      const VALID_SURFACES = new Set(['mobile', 'display', 'dashboard']);
-      const surface = VALID_SURFACES.has(data?.surface)
-        ? data.surface
-        : (data?.isDisplay ? 'display' : 'mobile');
-      const isDisplay = surface === 'display' || surface === 'dashboard';
-      const suppressPresence = Boolean(data?.suppressPresence);
-      // Only the dashboard is allowed to mutate battlemap structure. Display
-      // and mobile clients can request mutations but the server refuses.
-      const allowBattlemapMutations = surface === 'dashboard';
+      // Display name: prefer the freshly-supplied value (mobile sends current
+      // characterName on identify), fall back to a previously parked name on
+      // a disconnected user, otherwise null. Trim and clip — clients render
+      // this in tight panels so unbounded length is undesirable.
+      const incomingName = typeof data?.name === 'string' ? data.name.trim().slice(0, 40) : null;
+      const name = incomingName || restoredUserData?.name || null;
 
       userData = {
         id: userId,
@@ -1013,6 +1206,7 @@ app.prepare().then(async () => {
         color,
         position,
         size,
+        name,
         surface,
         isDisplay, // Kept for legacy code paths that read isDisplay directly.
         allowBattlemapMutations,
@@ -1020,13 +1214,18 @@ app.prepare().then(async () => {
       };
 
       // Mirror identity onto socket.data so the battlemap-switch reset can
-      // re-seat this socket without losing color/size/persistentUserId.
+      // re-seat this socket without losing color/size/persistentUserId/name.
       socket.data = {
         ...(socket.data || {}),
         persistentUserId,
         color,
         size,
         surface,
+        name,
+        // claimsPresence == "this socket owns a player token". The reset
+        // loop uses it to skip BattlemapProvider companion sockets, which
+        // share localStorage with the player's useSocket.
+        claimsPresence: claimsPresence,
         imageSrc: null,
       };
 
@@ -1044,6 +1243,12 @@ app.prepare().then(async () => {
       // Display mode users should not be visible to other users
       if (!isDisplay) {
         users.set(userId, userData);
+        // Auto-add this player to the active battlemap's initiative tracker
+        // so the DM doesn't have to enter edit mode every encounter.
+        const activeBattlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+        if (activeBattlemap && ensureInitiativeMember(activeBattlemap, persistentUserId, name || '')) {
+          broadcastInitiative(activeBattlemap);
+        }
       } else {
         // Store display mode users separately so we can verify removal requests
         displayModeUsers.set(userId, userData);
@@ -1058,6 +1263,7 @@ app.prepare().then(async () => {
         position,
         imageSrc: userData.imageSrc || null,
         size,
+        name,
       });
       // Send all active users (excluding display mode users)
       // Filter out any display mode users that might have been added
@@ -1082,6 +1288,7 @@ app.prepare().then(async () => {
             position,
             imageSrc: userData.imageSrc || null,
             size,
+            name,
           });
         } else {
           // User reconnected - broadcast reconnection
@@ -1092,6 +1299,7 @@ app.prepare().then(async () => {
             position,
             imageSrc: userData.imageSrc || null,
             size,
+            name,
           });
         }
       }
@@ -1103,10 +1311,13 @@ app.prepare().then(async () => {
       initializeUser(data);
     });
 
-    // If client doesn't send identification within 1 second, proceed with new user
+    // If a socket connects but never sends user-identify within 5s it is not
+    // a legitimate client (every real client emits it synchronously on
+    // connect — see useSocket.ts). Don't allocate a token with no persistent
+    // identity; just drop the socket so it can reconnect cleanly.
     setTimeout(() => {
       if (!identificationReceived) {
-        initializeUser({});
+        socket.disconnect(true);
       }
     }, 5000);
 
@@ -1666,32 +1877,9 @@ app.prepare().then(async () => {
     });
 
     // ---------------- Initiative tracker ----------------
-    // In-memory only; resets when the server restarts. Lives on the active
-    // battlemap so a map switch wipes it (matches the "scene reset" model).
-    const ensureInitiativeState = (battlemap) => {
-      if (!battlemap.initiative) {
-        battlemap.initiative = { entries: [], currentIndex: -1, round: 0 };
-      }
-      return battlemap.initiative;
-    };
-    const sanitizeInitiativeEntry = (e) => {
-      if (!e || typeof e !== 'object') return null;
-      const tokenId = typeof e.tokenId === 'string' ? e.tokenId.trim() : '';
-      if (!tokenId) return null;
-      const score = typeof e.score === 'number' && Number.isFinite(e.score) ? e.score : 0;
-      const name = typeof e.name === 'string' ? e.name.slice(0, 40) : '';
-      return { tokenId, score, name };
-    };
-    const broadcastInitiative = (battlemap) => {
-      const state = ensureInitiativeState(battlemap);
-      const sorted = [...state.entries].sort((a, b) => b.score - a.score);
-      broadcastToActive('initiative:updated', {
-        battlemapId: battlemap.id,
-        entries: sorted,
-        currentIndex: state.currentIndex,
-        round: state.round,
-      });
-    };
+    // The state and helpers live at outer scope (defined alongside
+    // broadcastToActive) so non-handler code paths — e.g. the battlemap-reset
+    // re-seat loop — can mutate initiative too.
 
     socket.on('initiative:set-entries', (payload, ack) => {
       if (!ensureBattlemapMutator('initiative:set-entries', ack)) return;
@@ -1748,8 +1936,49 @@ app.prepare().then(async () => {
       state.entries = [];
       state.currentIndex = -1;
       state.round = 0;
+      // Re-seed from currently present tokens so reset == "restart turn order
+      // with everyone who's actually here", not "blank slate forever".
+      for (const u of users.values()) {
+        if (u.isDisplay) continue;
+        const tid = u.persistentUserId || u.id;
+        ensureInitiativeMember(battlemap, tid, u.name || '');
+      }
       respond(ack, { ok: true });
       broadcastInitiative(battlemap);
+    });
+
+    // Drag-to-reorder from the dashboard. Accepts a flat array of tokenIds in
+    // the desired order; unknown ids are ignored, missing ones drop to the
+    // end so partial payloads degrade gracefully.
+    socket.on('initiative:reorder', (payload, ack) => {
+      if (!ensureBattlemapMutator('initiative:reorder', ack)) return;
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'no-active-battlemap' });
+        return;
+      }
+      const order = Array.isArray(payload?.order) ? payload.order : [];
+      if (reorderInitiative(battlemap, order)) {
+        broadcastInitiative(battlemap);
+      }
+      respond(ack, { ok: true });
+    });
+
+    // Inline score edit. Score is informational only (doesn't affect order
+    // anymore) but a "what did they roll?" column is still useful to the DM.
+    socket.on('initiative:set-score', (payload, ack) => {
+      if (!ensureBattlemapMutator('initiative:set-score', ack)) return;
+      const battlemap = battlemapState.maps.get(battlemapState.activeBattlemapId);
+      if (!battlemap) {
+        respond(ack, { ok: false, error: 'no-active-battlemap' });
+        return;
+      }
+      const tokenId = typeof payload?.tokenId === 'string' ? payload.tokenId : null;
+      const score = typeof payload?.score === 'number' ? payload.score : 0;
+      if (tokenId && setInitiativeScore(battlemap, tokenId, score)) {
+        broadcastInitiative(battlemap);
+      }
+      respond(ack, { ok: true });
     });
 
     // Send initiative on connect so a late-joining client gets caught up.
@@ -1764,7 +1993,7 @@ app.prepare().then(async () => {
         ok: true,
         state: {
           battlemapId: battlemap.id,
-          entries: [...state.entries].sort((a, b) => b.score - a.score),
+          entries: state.entries,
           currentIndex: state.currentIndex,
           round: state.round,
         },
@@ -1950,9 +2179,20 @@ app.prepare().then(async () => {
 
     // Handle disconnect
     socket.on('disconnect', () => {
+      const takenOverBy = socket.data?.takenOverBy;
       const user = users.get(userId);
       const displayUser = displayModeUsers.get(userId);
-      
+
+      if (takenOverBy) {
+        // A newer socket with the same persistentUserId already absorbed
+        // our state and broadcast user-reconnected. Don't park ourselves in
+        // disconnectedUsers and don't emit user-disconnected — we are being
+        // replaced, not parked.
+        users.delete(userId);
+        displayModeUsers.delete(userId);
+        return;
+      }
+
       if (user) {
         // Don't delete - move to disconnected users (in-memory)
         // Only do this for non-display users (display users are never in the users Map)
@@ -1964,11 +2204,15 @@ app.prepare().then(async () => {
           position: user.position,
           imageSrc: user.imageSrc || null,
           size: sanitizeTokenSize(user.size),
+          name: user.name ?? null,
           disconnectedAt: Date.now(),
         };
 
         disconnectedUsers.set(persistentId, disconnectedUserData);
         users.delete(userId);
+        // Drop them from initiative — disconnected players shouldn't keep
+        // their slot in the turn order.
+        mutateActiveInitiative((bm) => removeInitiativeMember(bm, persistentId));
         // Broadcast to all other clients with color and position
         broadcastFromSocketToActive(socket, 'user-disconnected', {
           userId,
@@ -1977,11 +2221,43 @@ app.prepare().then(async () => {
           position: user.position,
           imageSrc: user.imageSrc || null,
           size: sanitizeTokenSize(user.size),
+          name: user.name ?? null,
         });
       } else if (displayUser) {
         // Clean up display mode user
         displayModeUsers.delete(userId);
       }
+    });
+
+    // Mobile clients send this whenever the player picks/changes their
+    // character on the loading form. Update presence and broadcast so the
+    // dashboard's players panel reflects the change in real time.
+    socket.on('user-name-update', (payload) => {
+      const incoming = typeof payload?.name === 'string' ? payload.name.trim().slice(0, 40) : null;
+      const next = incoming || null;
+      const user = users.get(userId);
+      if (user) {
+        user.name = next;
+      }
+      const displayed = displayModeUsers.get(userId);
+      if (displayed) {
+        displayed.name = next;
+      }
+      const persistentId =
+        user?.persistentUserId || displayed?.persistentUserId || socket.data?.persistentUserId || userId;
+      const parked = persistentId ? disconnectedUsers.get(persistentId) : null;
+      if (parked) {
+        parked.name = next;
+      }
+      socket.data = { ...(socket.data || {}), name: next };
+      // Reach observers on this battlemap so the players panel updates live.
+      broadcastToActive('user-name-updated', {
+        userId,
+        persistentUserId: persistentId,
+        name: next,
+      });
+      // Keep the initiative entry's name in sync with the chosen character.
+      mutateActiveInitiative((bm) => renameInitiativeMember(bm, persistentId, next || ''));
     });
 
     // Handle token removal (only from display mode users)
@@ -2010,6 +2286,8 @@ app.prepare().then(async () => {
         
         // Broadcast removal to clients on the active battlemap.
         broadcastToActive('token-removed', { persistentUserId: data.persistentUserId });
+        // Pull the entry from initiative too — the token no longer exists.
+        mutateActiveInitiative((bm) => removeInitiativeMember(bm, data.persistentUserId));
       }
     });
 
@@ -2018,9 +2296,10 @@ app.prepare().then(async () => {
       if (!data || typeof data !== 'object') return;
       // Only DM surfaces (display/dashboard) can spawn tokens.
       if (!userData?.isDisplay) return;
-      const { color, position, size, imageSrc } = data;
+      const { color, position, size, imageSrc, name } = data;
       const tokenId = `token-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
       const persistentTokenId = `token-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+      const sanitizedName = typeof name === 'string' ? name.trim().slice(0, 40) : '';
 
       const tokenData = {
         id: tokenId,
@@ -2029,6 +2308,7 @@ app.prepare().then(async () => {
         position: sanitizePosition(position),
         size: sanitizeTokenSize(size),
         imageSrc: sanitizeAssetUrl(imageSrc),
+        name: sanitizedName || null,
         isDisplay: false,
       };
 
@@ -2041,7 +2321,12 @@ app.prepare().then(async () => {
         position: tokenData.position,
         size: tokenData.size,
         imageSrc: tokenData.imageSrc,
+        name: tokenData.name,
       });
+
+      // Auto-add the NPC to initiative so the DM doesn't have to enter the
+      // tracker every encounter — the same behavior as for player joins.
+      mutateActiveInitiative((bm) => ensureInitiativeMember(bm, persistentTokenId, sanitizedName));
     });
 
     // Legacy global cover handlers (add-cover/remove-cover/update-cover) were

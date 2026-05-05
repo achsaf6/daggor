@@ -14,6 +14,7 @@ export interface User {
   position: { x: number; y: number };
   imageSrc?: string | null;
   size?: TokenSize;
+  name?: string | null;
 }
 
 export interface ImageBounds {

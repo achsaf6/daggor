@@ -241,6 +241,21 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
   const socketRef = useRef<Socket | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const persistentUserIdRef = useRef<string | null>(null);
+  // Tracks URLs already kicked off via `new Image()` so re-renders don't
+  // refire the same request. Backed by the browser's HTTP cache; this set
+  // only suppresses duplicate work in the JS layer.
+  const prefetchedImagesRef = useRef<Set<string>>(new Set());
+
+  const prefetchImage = useCallback((url: string | null | undefined) => {
+    if (typeof window === "undefined") return;
+    if (!url) return;
+    const set = prefetchedImagesRef.current;
+    if (set.has(url)) return;
+    set.add(url);
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+  }, []);
 
   const clearDebounceTimer = useCallback(() => {
     if (debounceTimerRef.current) {
@@ -360,6 +375,9 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       debugLog("battlemap:list", list.map((item) => ({ id: item.id, name: item.name })));
       setBattlemaps(list);
       setIsListLoading(false);
+      // Warm the cache for every map's top image so switching maps is
+      // instant. Per-floor preload happens after the full battlemap loads.
+      list.forEach((item) => prefetchImage(item.mapPath));
     };
 
     const handleUpdated = (payload: BattlemapPayload) => {
@@ -371,6 +389,8 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         )
       );
       setCurrentBattlemap((prev) => (prev?.id === normalized.id ? normalized : prev));
+      prefetchImage(normalized.mapPath);
+      normalized.images?.forEach((img) => prefetchImage(img.mapPath));
     };
 
     const handleDeleted = ({ battlemapId }: { battlemapId: string }) => {
@@ -406,7 +426,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [isMounted, isDisplay, surface, allowBattlemapMutations]);
+  }, [isMounted, isDisplay, surface, allowBattlemapMutations, prefetchImage]);
 
   const requestBattlemap = useCallback(
     async (battlemapId: string) => {
@@ -419,6 +439,11 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
           const normalized = normalizeBattlemapPayload(response.battlemap as BattlemapPayload);
           debugLog("battlemap:get success", battlemapId, normalized.name);
           setCurrentBattlemap(normalized);
+          // Floors aren't included in the list summary; once we have the
+          // full battlemap, warm the cache for every floor so floor-switch
+          // is also instant.
+          prefetchImage(normalized.mapPath);
+          normalized.images?.forEach((img) => prefetchImage(img.mapPath));
         } else {
           debugLog("battlemap:get returned empty", battlemapId);
           setCurrentBattlemap(null);
@@ -431,7 +456,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
         setIsBattlemapLoading(false);
       }
     },
-    [emitWithAck]
+    [emitWithAck, prefetchImage]
   );
 
   useEffect(() => {

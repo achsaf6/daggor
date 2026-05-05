@@ -302,10 +302,11 @@
 }
 
 /* Display surface vignette wrapper (kept from previous version —
-   used on /display route). */
-.theatrical-vignette {
-  position: relative;
-}
+   used on /display route). The container it's applied to already has
+   position:fixed (Tailwind `fixed` class), so we deliberately do NOT set
+   position:relative here — that would clobber `fixed`, drop `inset-0`
+   to a no-op, and collapse the container to 0 height (which made the
+   <Image fill> child fail to lay out and the LoadingScreen never resolve). */
 .theatrical-vignette::after {
   content: "";
   position: absolute;

@@ -33,6 +33,7 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
   const surface = useSurface();
   const {
     myUserId,
+    myPersistentUserId,
     myColor,
     myPosition,
     myImageSrc,
@@ -41,6 +42,7 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     disconnectedUsers,
     updateTokenPosition,
     updateTokenImage,
+    updateMyName,
     removeToken,
     socket,
   } = useSocket(surface);
@@ -53,7 +55,10 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     initiativeState.currentIndex < initiativeState.entries.length
       ? initiativeState.entries[initiativeState.currentIndex].tokenId
       : null;
-  const isMyTurn = Boolean(myUserId && currentTurnTokenId === myUserId);
+  // Initiative entries are keyed by persistentUserId now (stable across
+  // reconnects), so compare against that — myUserId is the socket id which
+  // changes on every reconnect.
+  const isMyTurn = Boolean(myPersistentUserId && currentTurnTokenId === myPersistentUserId);
   const { character, hasSelectedCharacter } = useCharacter();
   const { imageBounds, updateBounds } = useImageBounds(containerRef);
   const { currentBattlemap, isBattlemapLoading } = useBattlemap();
@@ -89,6 +94,15 @@ export const MapViewMobile = ({ onReadyChange }: MapViewMobileProps) => {
     myImageSrc,
     updateTokenImage,
   ]);
+
+  // Push the chosen character's name to the server so the dashboard's
+  // players panel renders "Lyra" instead of a hex stub. Initial identify in
+  // useSocket also pulls from localStorage, but this fires when the player
+  // changes character mid-session.
+  useEffect(() => {
+    if (!myUserId) return;
+    updateMyName(character?.name ?? null);
+  }, [character, myUserId, updateMyName]);
 
   const gridScale = currentBattlemap?.gridScale ?? 1;
   const gridOffsetX = currentBattlemap?.gridOffsetX ?? 0;

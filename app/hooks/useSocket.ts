@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 import { User, Position, TokenSize, TokenTemplate } from "../types";
 import { Surface, isDmSurface } from "./useSurface";
@@ -9,6 +9,7 @@ interface UserWithPersistentId extends User {
 
 interface UseSocketReturn {
   myUserId: string | null;
+  myPersistentUserId: string | null;
   myColor: string;
   myPosition: Position;
   myImageSrc: string | null;
@@ -22,6 +23,7 @@ interface UseSocketReturn {
   updateTokenSize: (tokenId: string, size: TokenSize) => void;
   removeToken: (persistentUserId: string) => void;
   addToken: (tokenTemplate: TokenTemplate, position?: Position) => void;
+  updateMyName: (name: string | null) => void;
 }
 
 export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
@@ -92,12 +94,20 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
     // Handle connection
     socketInstance.on("connect", () => {
       console.log("Connected to server");
+      // Pull the character name from localStorage if the player has already
+      // chosen one in a prior session — otherwise the server only sees an id
+      // and the dashboard players panel can't do better than a hex stub.
+      const storedName =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem("characterName")
+          : null;
       // Send user identification immediately after connection
       socketInstance.emit("user-identify", {
         persistentUserId: persistentUserIdRef.current,
         surface,
         // Kept for back-compat with older server logic that still reads isDisplay.
         isDisplay,
+        name: storedName,
       });
     });
 
@@ -147,6 +157,10 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
         setMyPosition(data.position);
         setMyImageSrc(data.imageSrc || null);
         setMySize(data.size ?? "medium");
+        if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+          const w = window as unknown as { __daggor?: Record<string, unknown> };
+          w.__daggor = { ...(w.__daggor ?? {}), myColor: data.color, myUserId: data.userId };
+        }
       }
     );
 
@@ -163,6 +177,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
             position: user.position,
             imageSrc: user.imageSrc || null,
             size: user.size ?? "medium",
+            name: user.name ?? null,
           };
           if (user.persistentUserId) {
             userData.persistentUserId = user.persistentUserId;
@@ -183,6 +198,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
         position: { x: number; y: number };
         imageSrc?: string | null;
         size?: TokenSize;
+        name?: string | null;
       }) => {
         setOtherUsers((prev) => {
           const updated = new Map(prev);
@@ -192,6 +208,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
             position: data.position,
             imageSrc: data.imageSrc || null,
             size: data.size ?? "medium",
+            name: data.name ?? null,
           };
           if (data.persistentUserId) {
             userData.persistentUserId = data.persistentUserId;
@@ -237,7 +254,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
     });
 
     // Handle user disconnecting (moved to disconnected state)
-    socketInstance.on("user-disconnected", (data: { userId: string; persistentUserId: string; color: string; position: { x: number; y: number }; imageSrc?: string | null; size?: TokenSize }) => {
+    socketInstance.on("user-disconnected", (data: { userId: string; persistentUserId: string; color: string; position: { x: number; y: number }; imageSrc?: string | null; size?: TokenSize; name?: string | null }) => {
       // Remove from active users
       setOtherUsers((prev) => {
         const updated = new Map(prev);
@@ -252,6 +269,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
               position: user.position,
               imageSrc: user.imageSrc || data.imageSrc || null,
             size: user.size ?? data.size ?? "medium",
+            name: user.name ?? data.name ?? null,
             });
             return updatedDisconnected;
           });
@@ -271,6 +289,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
         position: { x: number; y: number };
         imageSrc?: string | null;
         size?: TokenSize;
+        name?: string | null;
       }) => {
         // Remove from disconnected users
         setDisconnectedUsers((prev) => {
@@ -288,6 +307,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
             imageSrc: data.imageSrc || null,
             persistentUserId: data.persistentUserId,
             size: data.size ?? "medium",
+            name: data.name ?? null,
           };
           updated.set(data.userId, userData);
           return updated;
@@ -331,6 +351,33 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
       setDisconnectedUsers(disconnectedMap);
     });
 
+    // Player names. Server broadcasts after a mobile client emits
+    // user-name-update; we patch both active and disconnected entries so the
+    // dashboard panel reflects the change without reconnecting.
+    socketInstance.on(
+      "user-name-updated",
+      (data: { userId: string; persistentUserId?: string; name: string | null }) => {
+        setOtherUsers((prev) => {
+          const updated = new Map(prev);
+          const user = updated.get(data.userId);
+          if (user) {
+            updated.set(data.userId, { ...user, name: data.name });
+          }
+          return updated;
+        });
+        if (data.persistentUserId) {
+          setDisconnectedUsers((prev) => {
+            const updated = new Map(prev);
+            const dc = updated.get(data.persistentUserId!);
+            if (dc) {
+              updated.set(data.persistentUserId!, { ...dc, name: data.name });
+            }
+            return updated;
+          });
+        }
+      }
+    );
+
     // Handle new token added
     socketInstance.on(
       "token-added",
@@ -341,6 +388,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
         position: { x: number; y: number };
         imageSrc?: string | null;
         size?: TokenSize;
+        name?: string | null;
       }) => {
         const userData: UserWithPersistentId = {
           id: data.userId,
@@ -349,6 +397,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
           imageSrc: data.imageSrc || null,
           persistentUserId: data.persistentUserId,
           size: data.size ?? "medium",
+          name: data.name ?? null,
         };
         setOtherUsers((prev) => {
           const updated = new Map(prev);
@@ -572,12 +621,34 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
         position,
         size: tokenTemplate.size,
         imageSrc: tokenTemplate.imageUrl ?? null,
+        name: tokenTemplate.name ?? null,
       });
     }
   };
 
+  // Tells the server my display name (e.g. "Lyra"). Mobile callers wire this
+  // up from CharacterProvider so the dashboard shows real names instead of
+  // shortened socket ids.
+  //
+  // Memoized AND deduped: callers (MapViewMobile) put this in a useEffect
+  // dep array. Without useCallback, every useSocket re-render minted a new
+  // function and refired the effect; without the lastSentNameRef guard,
+  // every refire would emit `user-name-update`, which the server broadcast
+  // back as `user-name-updated`, which updated otherUsers, which caused the
+  // next re-render — a self-sustaining flood (~thousands of events/sec
+  // observed in a probe).
+  const lastSentNameRef = useRef<string | null | undefined>(undefined);
+  const updateMyName = useCallback((name: string | null) => {
+    if (lastSentNameRef.current === name) return;
+    lastSentNameRef.current = name;
+    if (socketRef.current) {
+      socketRef.current.emit("user-name-update", { name });
+    }
+  }, []);
+
   return {
     myUserId,
+    myPersistentUserId: persistentUserIdRef.current,
     myColor,
     myPosition,
     myImageSrc,
@@ -591,6 +662,7 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
     updateTokenSize,
     removeToken,
     addToken,
+    updateMyName,
   };
 };
 

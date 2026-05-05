@@ -12,7 +12,7 @@ interface PlayerStatusPanelProps {
 
 interface Tile {
   key: string;
-  shortId: string;
+  label: string;
   color: string;
   status: "active" | "disconnected";
   position: { x: number; y: number };
@@ -20,6 +20,12 @@ interface Tile {
 
 const shorten = (id: string) =>
   id.length <= 8 ? id : `${id.slice(0, 4)}…${id.slice(-3)}`;
+
+// Prefer the player's chosen character name. Fall back to a shortened socket
+// id only when no name has flowed through yet — useful in the brief window
+// between connect and the mobile client's user-name-update.
+const labelFor = (u: { id: string; name?: string | null }) =>
+  u.name && u.name.trim().length > 0 ? u.name : shorten(u.id);
 
 // Belle Époque presence panel — illuminated journal page on the dark
 // dashboard. Title interrupts the top brass rule (engraved into the
@@ -33,7 +39,7 @@ export const PlayerStatusPanel = ({
     for (const u of activeUsers.values()) {
       out.push({
         key: u.id,
-        shortId: shorten(u.id),
+        label: labelFor(u),
         color: u.color,
         status: "active",
         position: u.position,
@@ -42,7 +48,7 @@ export const PlayerStatusPanel = ({
     for (const u of disconnectedUsers.values()) {
       out.push({
         key: `dc:${u.id}`,
-        shortId: shorten(u.id),
+        label: labelFor(u),
         color: u.color,
         status: "disconnected",
         position: u.position,
@@ -91,7 +97,7 @@ export const PlayerStatusPanel = ({
               />
               <div className="flex-1 min-w-0">
                 <div className="parchment-body text-sm font-medium truncate">
-                  {t.shortId}
+                  {t.label}
                 </div>
                 <div
                   className="parchment-numeric text-xs"

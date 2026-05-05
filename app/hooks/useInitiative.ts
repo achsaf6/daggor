@@ -66,6 +66,18 @@ export const useInitiative = (socket: Socket | null) => {
   const reset = useCallback(() => {
     socket?.emit("initiative:reset", {});
   }, [socket]);
+  const reorder = useCallback(
+    (orderedTokenIds: string[]) => {
+      socket?.emit("initiative:reorder", { order: orderedTokenIds });
+    },
+    [socket]
+  );
+  const setScore = useCallback(
+    (tokenId: string, score: number) => {
+      socket?.emit("initiative:set-score", { tokenId, score });
+    },
+    [socket]
+  );
 
-  return { state, setEntries, advance, reset };
+  return { state, setEntries, advance, reset, reorder, setScore };
 };
