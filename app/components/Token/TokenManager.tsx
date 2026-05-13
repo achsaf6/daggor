@@ -116,7 +116,9 @@ export const TokenManager = ({
       {Array.from(disconnectedUsers.values()).map((user) => {
         // Disconnected tokens are only interactive in display mode (they can't be the user's own token since they're disconnected)
         const isTokenInteractive = isDisplay;
-        // Disconnected tokens should have lower z-index (default 10)
+        // Bump opacity a bit on DM surfaces so the cursor-move affordance reads
+        // as "draggable" rather than "ghost". Players see the dimmer 0.45.
+        const dimOpacity = isDisplay ? 0.75 : 0.45;
         return (
           <DraggableToken
             key={user.id}
@@ -132,9 +134,13 @@ export const TokenManager = ({
             gridOffsetX={gridOffsetX}
             gridOffsetY={gridOffsetY}
             isMounted={isMounted}
-            opacity={0.6}
+            opacity={dimOpacity}
             onContextMenu={isDisplay ? (e) => handleTokenContextMenu(e, user.id) : undefined}
-            title={isDisplay ? "Disconnected - Right-click to remove" : "Disconnected"}
+            title={
+              isDisplay
+                ? "Offline player — drag to move, long-press for actions, right-click to remove"
+                : "Disconnected"
+            }
             onPositionUpdate={onPositionUpdate}
             onImageUpload={onImageUpload}
             transform={transform}
