@@ -2,9 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
-import { Pause, Play, Plus, Square as Stop, Trash2, Volume2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Pause,
+  Play,
+  Plus,
+  Settings,
+  Square as Stop,
+  Trash2,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { Equalizer } from "../Theatrical/Equalizer";
-import { PanelFrame } from "../Theatrical/PanelFrame";
 
 interface SoundboardPanelProps {
   socket: Socket | null;
@@ -40,30 +50,32 @@ const loadClips = (): Clip[] => {
   }
 };
 
-// Soundboard panel for /dashboard.
-// - Library of clip {name, url, loop} lives in localStorage (no DB needed).
-// - Broadcast mode emits `soundboard:play` so every connected client plays
-//   the clip; DM-only mode plays through a local <audio> element so the GM's
-//   laptop alone hits the room speakers.
+// Glass Atelier soundboard. Default-collapsed: row of icon buttons, one per
+// clip, sits in the corner. Click the gear to expand into a management panel
+// for naming, looping, and adding new clips. Mode toggles between broadcast
+// (every connected client plays via socket) and DM-only (local <audio>).
+const loadMode = (): "broadcast" | "dm-only" => {
+  if (typeof window === "undefined") return "broadcast";
+  try {
+    const stored = window.localStorage.getItem(MODE_KEY);
+    if (stored === "broadcast" || stored === "dm-only") return stored;
+  } catch {
+    // ignore
+  }
+  return "broadcast";
+};
+
 export const SoundboardPanel = ({ socket }: SoundboardPanelProps) => {
   const [clips, setClips] = useState<Clip[]>(() => loadClips());
-  const [mode, setMode] = useState<"broadcast" | "dm-only">("broadcast");
+  const [mode, setMode] = useState<"broadcast" | "dm-only">(loadMode);
   const [draftName, setDraftName] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
   const [draftLoop, setDraftLoop] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const storedMode = window.localStorage.getItem(MODE_KEY);
-      if (storedMode === "broadcast" || storedMode === "dm-only") setMode(storedMode);
-    } catch {
-      // ignore
-    }
-  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -75,7 +87,6 @@ export const SoundboardPanel = ({ socket }: SoundboardPanelProps) => {
     window.localStorage.setItem(MODE_KEY, mode);
   }, [mode]);
 
-  // Stop any in-flight DM-only playback when the component unmounts.
   useEffect(() => {
     return () => {
       const a = localAudioRef.current;
@@ -145,187 +156,294 @@ export const SoundboardPanel = ({ socket }: SoundboardPanelProps) => {
     if (playingId === id) stopAll();
   };
 
-  // Brass-inked button base — used everywhere in this panel.
-  const inkBtn =
-    "parchment-numeric text-sm py-2 px-3 border transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-30";
-  const inkBtnStyle: React.CSSProperties = {
-    color: "var(--brass-shadow)",
-    borderColor: "var(--brass-deep)",
-    background: "rgba(255, 252, 240, 0.4)",
-  };
-
   return (
-    <div className="parchment-panel fixed right-4 bottom-4 z-40 w-96 max-h-[60vh] overflow-visible">
-      <PanelFrame
-        title={
-          <>
-            <Volume2
-              className="inline-block h-3.5 w-3.5 mr-2 -mt-0.5"
-              style={{ color: "var(--brass-deep)" }}
-            />
-            Soundboard <span className="opacity-70">· {mode === "broadcast" ? "Broadcast" : "DM only"}</span>
-          </>
-        }
-        trailing={
+    <div className="fixed right-4 bottom-4 z-40 flex flex-col items-end gap-2">
+      {/* Expanded management panel (renders above the icon strip) */}
+      {isExpanded && (
+        <div
+          className="glass-panel"
+          style={{ width: 360, maxHeight: "60vh", overflow: "hidden" }}
+        >
+          <div className="px-4 py-2.5 border-b border-[var(--glass-border)] flex items-center justify-between">
+            <div className="glass-heading flex items-center gap-1.5">
+              <Volume2 className="h-3 w-3" />
+              Soundboard ·{" "}
+              <span className="opacity-70 normal-case tracking-normal">
+                {mode === "broadcast" ? "Broadcast" : "DM only"}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMode(mode === "broadcast" ? "dm-only" : "broadcast")}
+              aria-label="Toggle broadcast"
+              title="Toggle: broadcast to all clients vs play only on this dashboard"
+              className="glass-btn glass-btn-icon"
+              style={{ width: 24, height: 24 }}
+            >
+              {mode === "broadcast" ? (
+                <Volume2 className="h-3 w-3" />
+              ) : (
+                <VolumeX className="h-3 w-3" />
+              )}
+            </button>
+          </div>
+
+          <div className="px-4 py-3 overflow-y-auto" style={{ maxHeight: 300 }}>
+            {clips.length === 0 ? (
+              <div className="glass-muted text-xs">No clips yet.</div>
+            ) : (
+              <ul className="flex flex-col">
+                {clips.map((c) => {
+                  const isPlaying = playingId === c.id;
+                  return (
+                    <li
+                      key={c.id}
+                      className="flex items-center gap-2 py-1.5 border-b last:border-b-0"
+                      style={{ borderColor: "var(--glass-border)" }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => (isPlaying ? stopAll() : playClip(c))}
+                        aria-label={isPlaying ? "Pause" : "Play"}
+                        className="glass-btn glass-btn-icon"
+                        style={{
+                          width: 26,
+                          height: 26,
+                          ...(isPlaying
+                            ? {
+                                background: "var(--glass-accent-soft)",
+                                borderColor: "var(--glass-accent)",
+                                color: "var(--glass-accent)",
+                              }
+                            : {}),
+                        }}
+                      >
+                        {isPlaying ? (
+                          <Pause className="h-3 w-3 fill-current" />
+                        ) : (
+                          <Play className="h-3 w-3 fill-current" />
+                        )}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="glass-body text-xs truncate" title={c.url}>
+                          {c.name}
+                          {c.loop && (
+                            <span
+                              className="glass-numeric ml-1.5"
+                              style={{ fontSize: "0.6rem", color: "var(--glass-accent)" }}
+                            >
+                              · LOOP
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {isPlaying ? (
+                        <Equalizer bars={6} height={14} />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => removeClip(c.id)}
+                          aria-label="Remove clip"
+                          className="glass-btn glass-btn-icon"
+                          style={{
+                            width: 22,
+                            height: 22,
+                            border: "none",
+                            color: "var(--glass-txt-faint)",
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {isAdding ? (
+              <div className="space-y-2 mt-3 pt-3 border-t border-[var(--glass-border)]">
+                <input
+                  type="text"
+                  value={draftName}
+                  onChange={(e) => setDraftName(e.target.value)}
+                  placeholder="Name (e.g. Tavern ambient)"
+                  className="glass-body w-full px-2 py-1.5 text-xs focus:outline-none"
+                  style={{
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid var(--glass-border)",
+                    borderRadius: 6,
+                    color: "var(--glass-txt)",
+                  }}
+                />
+                <input
+                  type="url"
+                  value={draftUrl}
+                  onChange={(e) => setDraftUrl(e.target.value)}
+                  placeholder="https://… (mp3/ogg URL)"
+                  className="glass-body w-full px-2 py-1.5 text-xs focus:outline-none"
+                  style={{
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid var(--glass-border)",
+                    borderRadius: 6,
+                    color: "var(--glass-txt)",
+                  }}
+                />
+                <label className="glass-muted flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={draftLoop}
+                    onChange={(e) => setDraftLoop(e.target.checked)}
+                    style={{ accentColor: "var(--glass-accent)" }}
+                  />
+                  Loop
+                </label>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={addClip}
+                    disabled={!draftUrl.trim()}
+                    className="glass-btn glass-btn-primary flex-1 text-xs"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAdding(false);
+                      setDraftName("");
+                      setDraftUrl("");
+                      setDraftLoop(false);
+                    }}
+                    className="glass-btn text-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAdding(true)}
+                className="glass-btn w-full mt-3 flex items-center justify-center gap-1.5 text-xs"
+              >
+                <Plus className="h-3 w-3" />
+                Add clip
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Always-visible icon strip */}
+      <div className="glass-panel flex items-center gap-1 p-1.5">
+        {clips.length === 0 ? (
           <button
             type="button"
-            onClick={() => setMode(mode === "broadcast" ? "dm-only" : "broadcast")}
-            className="rounded p-1 text-[var(--brass-deep)] hover:text-[var(--brass-shadow)] transition-colors"
-            aria-label="Toggle broadcast"
-            title="Toggle: broadcast to all clients vs play only on this dashboard"
+            onClick={() => {
+              setIsExpanded(true);
+              setIsAdding(true);
+            }}
+            className="glass-btn flex items-center gap-1.5 text-xs"
+            aria-label="Add first clip"
           >
-            <Volume2 className="h-3.5 w-3.5" />
+            <Plus className="h-3 w-3" />
+            Add clip
           </button>
-        }
-      />
-      <div className="px-5 pt-10 pb-5 overflow-y-auto max-h-[60vh]">
-        <ul className="flex flex-col mb-4">
-          {clips.length === 0 && (
-            <li className="parchment-flavor text-sm">No clips yet.</li>
-          )}
-          {clips.map((c) => {
+        ) : (
+          clips.map((c) => {
             const isPlaying = playingId === c.id;
+            const isHovered = hoverId === c.id;
             return (
-              <li
+              <div
                 key={c.id}
-                className="flex items-center gap-3 py-2 border-b last:border-b-0"
-                style={{ borderColor: "rgba(110, 83, 32, 0.2)" }}
+                className="relative"
+                onMouseEnter={() => setHoverId(c.id)}
+                onMouseLeave={() => setHoverId((p) => (p === c.id ? null : p))}
               >
                 <button
                   type="button"
                   onClick={() => (isPlaying ? stopAll() : playClip(c))}
-                  aria-label={isPlaying ? "Pause" : "Play"}
-                  title={isPlaying ? "Pause" : "Play"}
-                  className="h-8 w-8 flex items-center justify-center border transition-colors hover:bg-[rgba(201,162,74,0.2)]"
+                  aria-label={isPlaying ? `Stop ${c.name}` : `Play ${c.name}`}
+                  className="glass-btn glass-btn-icon"
                   style={{
-                    color: "var(--brass-shadow)",
-                    borderColor: "var(--brass-deep)",
-                    background: isPlaying ? "rgba(201, 162, 74, 0.2)" : "transparent",
+                    width: 32,
+                    height: 32,
+                    ...(isPlaying
+                      ? {
+                          background: "var(--glass-accent-soft)",
+                          borderColor: "var(--glass-accent)",
+                          color: "var(--glass-accent)",
+                        }
+                      : {}),
                   }}
                 >
-                  {isPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5 fill-current" />}
+                  {isPlaying ? (
+                    <Equalizer bars={3} height={12} />
+                  ) : (
+                    <Play className="h-3.5 w-3.5 fill-current" />
+                  )}
                 </button>
-                <div className="flex-1 min-w-0">
+                {isHovered && (
                   <div
-                    className="parchment-body text-sm truncate"
-                    style={{ color: "var(--parchment-ink)" }}
-                    title={c.url}
+                    className="glass-panel absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 whitespace-nowrap pointer-events-none"
+                    style={{ zIndex: 50 }}
                   >
-                    {c.name}
+                    <div className="glass-body text-xs font-medium">{c.name}</div>
                     {c.loop && (
-                      <span
-                        className="parchment-numeric ml-2"
-                        style={{ fontSize: "0.65rem", color: "var(--brass-deep)" }}
+                      <div
+                        className="glass-numeric"
+                        style={{ fontSize: "0.6rem", color: "var(--glass-accent)" }}
                       >
-                        · LOOP
-                      </span>
+                        LOOP
+                      </div>
                     )}
                   </div>
-                  <div
-                    className="parchment-numeric"
-                    style={{
-                      fontSize: "0.7rem",
-                      color: isPlaying ? "var(--brass-shadow)" : "var(--parchment-ink-muted)",
-                    }}
-                  >
-                    {isPlaying ? "PLAYING" : "PAUSED"}
-                  </div>
-                </div>
-                {isPlaying ? (
-                  <Equalizer bars={12} height={20} />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => removeClip(c.id)}
-                    aria-label="Remove clip"
-                    title="Remove clip"
-                    className="h-6 w-6 flex items-center justify-center hover:text-[var(--brass-shadow)] transition-colors"
-                    style={{ color: "var(--parchment-ink-muted)" }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
                 )}
-              </li>
+              </div>
             );
-          })}
-        </ul>
+          })
+        )}
 
-        {isAdding ? (
-          <div className="space-y-2">
-            <input
-              type="text"
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              placeholder="Name (e.g. Tavern ambient)"
-              className="parchment-body w-full px-2 py-1.5 text-sm bg-[rgba(255,252,240,0.6)] border focus:outline-none focus:border-[var(--brass-shadow)]"
-              style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)" }}
+        {clips.length > 0 && (
+          <>
+            <div
+              aria-hidden
+              style={{
+                width: 1,
+                alignSelf: "stretch",
+                background: "var(--glass-border)",
+                margin: "0 2px",
+              }}
             />
-            <input
-              type="url"
-              value={draftUrl}
-              onChange={(e) => setDraftUrl(e.target.value)}
-              placeholder="https://… (mp3/ogg URL)"
-              className="parchment-body w-full px-2 py-1.5 text-sm bg-[rgba(255,252,240,0.6)] border focus:outline-none focus:border-[var(--brass-shadow)]"
-              style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)" }}
-            />
-            <label className="parchment-flavor flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={draftLoop}
-                onChange={(e) => setDraftLoop(e.target.checked)}
-                style={{ accentColor: "var(--brass-deep)" }}
-              />
-              Loop
-            </label>
-            <div className="flex gap-2 pt-1">
-              <button
-                type="button"
-                onClick={addClip}
-                disabled={!draftUrl.trim()}
-                className={`flex-1 ${inkBtn}`}
-                style={inkBtnStyle}
-              >
-                SAVE
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsAdding(false);
-                  setDraftName("");
-                  setDraftUrl("");
-                  setDraftLoop(false);
-                }}
-                className="parchment-numeric text-sm py-2 px-4 hover:text-[var(--brass-shadow)] transition-colors"
-                style={{ color: "var(--brass-deep)" }}
-              >
-                CANCEL
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setIsAdding(true)}
-              className={`flex-1 flex items-center justify-center gap-1.5 ${inkBtn}`}
-              style={inkBtnStyle}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              ADD CLIP
-            </button>
             <button
               type="button"
               onClick={stopAll}
               disabled={!playingId}
               aria-label="Stop all"
-              title="Stop all"
-              className={inkBtn}
-              style={{ ...inkBtnStyle, padding: "0.5rem 0.75rem" }}
+              className="glass-btn glass-btn-icon"
+              style={{ width: 28, height: 28 }}
             >
-              <Stop className="h-3.5 w-3.5" />
+              <Stop className="h-3 w-3 fill-current" />
             </button>
-          </div>
+          </>
         )}
+
+        <button
+          type="button"
+          onClick={() => setIsExpanded((v) => !v)}
+          aria-label={isExpanded ? "Close manager" : "Open manager"}
+          className="glass-btn glass-btn-icon"
+          style={{ width: 28, height: 28 }}
+        >
+          {isExpanded ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : clips.length > 0 ? (
+            <Settings className="h-3 w-3" />
+          ) : (
+            <ChevronUp className="h-3 w-3" />
+          )}
+        </button>
       </div>
     </div>
   );

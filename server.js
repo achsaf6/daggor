@@ -43,16 +43,24 @@ let supportsBattlemapActiveImageId = true; // optimistic; will be disabled if co
 let supportsBattlemapCoverImageId = false;
 let supportsBattlemapSpawnArea = true; // optimistic; disabled if migration 008 not applied
 
-const persistBattlemapOrder = (orderedIds) => {
+// supabase-js resolves with `{ data, error }` instead of rejecting on DB errors,
+// so background persistence used to swallow failures silently. This wrapper
+// turns `{ error }` into a thrown exception so `runBackgroundTask`'s catch logs it.
+const throwIfSupabaseError = ({ error }) => {
+  if (error) throw error;
+};
+
+const persistBattlemapOrder = async (orderedIds) => {
   if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
-    return Promise.resolve();
+    return;
   }
 
-  return Promise.all(
+  const results = await Promise.all(
     orderedIds.map((battlemapId, index) =>
       supabase.from('battlemaps').update({ sort_index: index }).eq('id', battlemapId)
     )
   );
+  for (const result of results) throwIfSupabaseError(result);
 };
 
 const getDefaultBattlemapId = () => {
@@ -191,8 +199,7 @@ const sanitizeFogShape = (input) => {
   const h = clampValue(typeof input.height === 'number' ? input.height : 0, 0, 100);
   if (x === null || y === null || w < 0.5 || h < 0.5) return null;
   return {
-    id: typeof input.id === 'string' && input.id ? input.id
-      : `fog-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    id: typeof input.id === 'string' && input.id ? input.id : randomUUID(),
     x: clampValue(x, 0, 100 - w),
     y: clampValue(y, 0, 100 - h),
     width: w,
@@ -216,7 +223,7 @@ const sanitizeCover = (input) => {
   };
 };
 
-const generateCoverId = () => `cover-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+const generateCoverId = () => randomUUID();
 
 const serializeBattlemapSummary = (battlemap) => ({
   id: battlemap.id,
@@ -867,9 +874,13 @@ app.prepare().then(async () => {
     io.emit('battlemap:deleted', { battlemapId });
   };
 
-  const insertBattlemapRow = (battlemap, sortIndex = 0) =>
-    supabase.from('battlemaps').insert((() => {
-      const row = {
+  // `battlemaps.active_image_id` and `battlemap_images.battlemap_id` reference
+  // each other (migration 007), so one side must be inserted with the FK null
+  // and patched up after the dependent row exists. Callers creating a brand
+  // new battlemap pass { skipActiveImage: true } and then re-issue
+  // `updateBattlemapRow` once the image row has been inserted.
+  const insertBattlemapRow = async (battlemap, sortIndex = 0, { skipActiveImage = false } = {}) => {
+    const row = {
       id: battlemap.id,
       name: battlemap.name,
       map_path: battlemap.mapPath,
@@ -878,54 +889,50 @@ app.prepare().then(async () => {
       grid_offset_y: battlemap.gridOffsetY,
       grid_data: battlemap.gridData,
       sort_index: sortIndex,
-      };
-      if (supportsBattlemapActiveImageId) {
-        row.active_image_id = battlemap.activeImageId ?? null;
-      }
-      if (supportsBattlemapSpawnArea) {
-        row.spawn_area = sanitizeSpawnArea(battlemap.spawnArea);
-      }
-      return row;
-    })());
-
-  const updateBattlemapRow = (battlemapId) => {
-    const battlemap = battlemapState.maps.get(battlemapId);
-    if (!battlemap) {
-      return Promise.resolve();
+    };
+    if (supportsBattlemapActiveImageId) {
+      row.active_image_id = skipActiveImage ? null : (battlemap.activeImageId ?? null);
     }
-
-    return supabase
-      .from('battlemaps')
-      .update((() => {
-        const row = {
-        name: battlemap.name,
-        map_path: battlemap.mapPath,
-        grid_scale: battlemap.gridScale,
-        grid_offset_x: battlemap.gridOffsetX,
-        grid_offset_y: battlemap.gridOffsetY,
-        grid_data: battlemap.gridData,
-        updated_at: new Date().toISOString(),
-        };
-        if (supportsBattlemapActiveImageId) {
-          row.active_image_id = battlemap.activeImageId ?? null;
-        }
-        if (supportsBattlemapSpawnArea) {
-          row.spawn_area = sanitizeSpawnArea(battlemap.spawnArea);
-        }
-        return row;
-      })())
-      .eq('id', battlemapId);
+    if (supportsBattlemapSpawnArea) {
+      row.spawn_area = sanitizeSpawnArea(battlemap.spawnArea);
+    }
+    throwIfSupabaseError(await supabase.from('battlemaps').insert(row));
   };
 
-  const deleteBattlemapRow = (battlemapId) =>
-    supabase.from('battlemaps').delete().eq('id', battlemapId);
+  const updateBattlemapRow = async (battlemapId) => {
+    const battlemap = battlemapState.maps.get(battlemapId);
+    if (!battlemap) return;
 
-  const deleteCoversForBattlemap = (battlemapId) =>
-    supabase.from('battlemap_covers').delete().eq('battlemap_id', battlemapId);
+    const row = {
+      name: battlemap.name,
+      map_path: battlemap.mapPath,
+      grid_scale: battlemap.gridScale,
+      grid_offset_x: battlemap.gridOffsetX,
+      grid_offset_y: battlemap.gridOffsetY,
+      grid_data: battlemap.gridData,
+      updated_at: new Date().toISOString(),
+    };
+    if (supportsBattlemapActiveImageId) {
+      row.active_image_id = battlemap.activeImageId ?? null;
+    }
+    if (supportsBattlemapSpawnArea) {
+      row.spawn_area = sanitizeSpawnArea(battlemap.spawnArea);
+    }
+    throwIfSupabaseError(await supabase.from('battlemaps').update(row).eq('id', battlemapId));
+  };
 
-  const upsertCoverRow = (battlemapId, cover, battlemapImageId = null) =>
-    supabase.from('battlemap_covers').upsert((() => {
-      const row = {
+  const deleteBattlemapRow = async (battlemapId) => {
+    throwIfSupabaseError(await supabase.from('battlemaps').delete().eq('id', battlemapId));
+  };
+
+  const deleteCoversForBattlemap = async (battlemapId) => {
+    throwIfSupabaseError(
+      await supabase.from('battlemap_covers').delete().eq('battlemap_id', battlemapId)
+    );
+  };
+
+  const upsertCoverRow = async (battlemapId, cover, battlemapImageId = null) => {
+    const row = {
       id: cover.id,
       battlemap_id: battlemapId,
       x: cover.x,
@@ -933,29 +940,38 @@ app.prepare().then(async () => {
       width: cover.width,
       height: cover.height,
       color: cover.color,
-      };
-      if (supportsBattlemapCoverImageId) {
-        row.battlemap_image_id = battlemapImageId;
-      }
-      return row;
-    })());
+    };
+    if (supportsBattlemapCoverImageId) {
+      row.battlemap_image_id = battlemapImageId;
+    }
+    throwIfSupabaseError(await supabase.from('battlemap_covers').upsert(row));
+  };
 
-  const deleteCoverRow = (coverId) => supabase.from('battlemap_covers').delete().eq('id', coverId);
+  const deleteCoverRow = async (coverId) => {
+    throwIfSupabaseError(await supabase.from('battlemap_covers').delete().eq('id', coverId));
+  };
 
-  const insertBattlemapImageRow = (image) =>
-    supabase.from('battlemap_images').insert({
-      id: image.id,
-      battlemap_id: image.battlemapId,
-      name: image.name,
-      map_path: image.mapPath,
-      sort_index: image.sortIndex ?? 0,
-    });
+  const insertBattlemapImageRow = async (image) => {
+    throwIfSupabaseError(
+      await supabase.from('battlemap_images').insert({
+        id: image.id,
+        battlemap_id: image.battlemapId,
+        name: image.name,
+        map_path: image.mapPath,
+        sort_index: image.sortIndex ?? 0,
+      })
+    );
+  };
 
-  const updateBattlemapImageRow = (imageId, updates) =>
-    supabase.from('battlemap_images').update(updates).eq('id', imageId);
+  const updateBattlemapImageRow = async (imageId, updates) => {
+    throwIfSupabaseError(
+      await supabase.from('battlemap_images').update(updates).eq('id', imageId)
+    );
+  };
 
-  const deleteBattlemapImageRow = (imageId) =>
-    supabase.from('battlemap_images').delete().eq('id', imageId);
+  const deleteBattlemapImageRow = async (imageId) => {
+    throwIfSupabaseError(await supabase.from('battlemap_images').delete().eq('id', imageId));
+  };
 
   const getBattlemapImageById = (battlemap, imageId) => {
     if (!battlemap || !Array.isArray(battlemap.images)) return null;
@@ -1385,8 +1401,11 @@ app.prepare().then(async () => {
       emitBattlemapUpdate(battlemapId);
 
       runBackgroundTask('insert battlemap', async () => {
-        await insertBattlemapRow(newBattlemap, newSortIndex);
-        if (supportsBattlemapImages && initialImageId) {
+        // Cyclic FK between battlemaps.active_image_id and battlemap_images.battlemap_id
+        // forces a three-step write: parent with NULL FK, child, then patch parent.
+        const hasInitialImage = supportsBattlemapImages && initialImageId;
+        await insertBattlemapRow(newBattlemap, newSortIndex, { skipActiveImage: hasInitialImage });
+        if (hasInitialImage) {
           await insertBattlemapImageRow({
             id: initialImageId,
             battlemapId,
@@ -1394,6 +1413,7 @@ app.prepare().then(async () => {
             mapPath: sanitizedPath,
             sortIndex: 0,
           });
+          await updateBattlemapRow(battlemapId);
         }
       });
     });
@@ -1570,6 +1590,14 @@ app.prepare().then(async () => {
             battlemap.covers.delete(key);
           }
         }
+      }
+
+      // Cascade fog cleanup. fogByImage is keyed by floor id; without this
+      // the array leaks for the lifetime of the process every time a floor
+      // is deleted, and a floor that re-uses the id (it shouldn't, but…)
+      // would inherit stale shapes.
+      if (battlemap.fogByImage && imageId in battlemap.fogByImage) {
+        delete battlemap.fogByImage[imageId];
       }
 
       if (battlemap.activeImageId === imageId) {
@@ -2096,18 +2124,32 @@ app.prepare().then(async () => {
       if (x === null || y === null) return;
       const position = { x, y };
 
-      const targetUser = users.get(targetUserId);
-      if (!targetUser) return;
-      // Players can only move their own token (matched by persistent ID, since
-      // the socketId-keyed tokenId can change across reconnects). DMs can
-      // move any token.
       const callerIsDm = Boolean(userData?.isDisplay);
-      const callerOwnsTarget =
-        Boolean(userData?.persistentUserId) &&
-        targetUser.persistentUserId === userData.persistentUserId;
-      if (!callerIsDm && !callerOwnsTarget) return;
+      const targetUser = users.get(targetUserId);
+      if (targetUser) {
+        // Players can only move their own token (matched by persistent ID, since
+        // the socketId-keyed tokenId can change across reconnects). DMs can
+        // move any token.
+        const callerOwnsTarget =
+          Boolean(userData?.persistentUserId) &&
+          targetUser.persistentUserId === userData.persistentUserId;
+        if (!callerIsDm && !callerOwnsTarget) return;
 
-      targetUser.position = position;
+        targetUser.position = position;
+        broadcastFromSocketToActive(socket, 'user-moved', {
+          userId: targetUserId,
+          position,
+        });
+        return;
+      }
+
+      // Disconnected players are only in disconnectedUsers (keyed by
+      // persistentUserId). Only DMs can move them — players can't reach a
+      // token they don't own anyway.
+      if (!callerIsDm) return;
+      const parkedUser = disconnectedUsers.get(targetUserId);
+      if (!parkedUser) return;
+      parkedUser.position = position;
       broadcastFromSocketToActive(socket, 'user-moved', {
         userId: targetUserId,
         position,

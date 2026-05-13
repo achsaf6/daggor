@@ -5,6 +5,7 @@ import { Surface, SurfaceProvider, isDmSurface } from "../hooks/useSurface";
 import { BattlemapProvider } from "../providers/BattlemapProvider";
 import { CharacterProvider } from "../providers/CharacterProvider";
 import { useFinePointer } from "../hooks/useFinePointer";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 // MapView reads from the SurfaceProvider, so it must be mounted inside it.
 // Dynamic-import keeps SSR off (preserves the previous "ssr: false" behavior
@@ -33,13 +34,15 @@ export const SurfaceShell = ({ surface }: SurfaceShellProps) => {
   }
 
   return (
-    <SurfaceProvider value={surface}>
-      <BattlemapProvider>
-        <CharacterProvider>
-          <MapView surface={surface} />
-        </CharacterProvider>
-      </BattlemapProvider>
-    </SurfaceProvider>
+    <ErrorBoundary surface={surface}>
+      <SurfaceProvider value={surface}>
+        <BattlemapProvider>
+          <CharacterProvider>
+            <MapView surface={surface} />
+          </CharacterProvider>
+        </BattlemapProvider>
+      </SurfaceProvider>
+    </ErrorBoundary>
   );
 };
 

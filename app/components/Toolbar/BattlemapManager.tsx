@@ -291,29 +291,29 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
 
   return (
     <div
-      className="parchment-body text-sm space-y-4 overflow-y-auto max-h-[70vh] pr-2"
-      style={{ color: "var(--parchment-ink)" }}
+      className="glass-body text-sm space-y-4 pr-2"
+      style={{ color: "var(--glass-txt)" }}
       onClick={(event) => event.stopPropagation()}
     >
       <div className="flex items-center justify-between">
-        <h3 className="parchment-heading text-sm">Battlemap Manager</h3>
+        <h3 className="glass-heading text-sm">Battlemap Manager</h3>
         {onClose && (
           <button
             type="button"
             onClick={onClose}
-            className="parchment-numeric transition-colors hover:text-[var(--brass-shadow)]"
-            style={{ color: "var(--brass-deep)" }}
+            className="glass-numeric transition-colors hover:text-[var(--glass-accent-deep)]"
+            style={{ color: "var(--glass-accent)" }}
             aria-label="Close battlemap manager"
           >
             ✕
           </button>
         )}
       </div>
-      <div className="parchment-rule -mt-2 mb-2" />
+      <div className=" -mt-2 mb-2" />
 
       {error ? (
         <div
-          className="parchment-flavor px-3 py-2 text-xs border"
+          className="glass-muted px-3 py-2 text-xs border"
           style={{ color: "#7a2424", borderColor: "#7a2424", background: "rgba(166, 49, 49, 0.08)" }}
         >
           {error}
@@ -321,21 +321,21 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
       ) : null}
 
       <div className="space-y-2">
-        <label className="parchment-numeric block text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+        <label className="glass-numeric block text-xs" style={{ color: "var(--glass-txt-muted)" }}>
           Active Battlemaps
         </label>
 
         {isListLoading ? (
           <div
-            className="parchment-flavor w-full px-3 py-3 text-sm border"
-            style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+            className="glass-muted w-full px-3 py-3 text-sm border"
+            style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt-muted)", background: "rgba(255,255,255,0.04)" }}
           >
             Loading battlemaps…
           </div>
         ) : availableBattlemaps.length === 0 ? (
           <div
-            className="parchment-flavor w-full px-3 py-3 text-sm border"
-            style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+            className="glass-muted w-full px-3 py-3 text-sm border"
+            style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt-muted)", background: "rgba(255,255,255,0.04)" }}
           >
             No battlemaps available yet.
           </div>
@@ -365,18 +365,18 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
           </DndContext>
         )}
         {!canManageBattlemaps ? (
-          <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+          <p className="glass-muted text-xs" style={{ color: "var(--glass-txt-muted)" }}>
             Only the display host can reorder battlemaps.
           </p>
         ) : dragEnabled ? (
-          <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+          <p className="glass-muted text-xs" style={{ color: "var(--glass-txt-muted)" }}>
             Drag the handle beside a map to change its order.
           </p>
         ) : null}
       </div>
 
       <div className="space-y-2">
-        <label className="parchment-numeric block text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+        <label className="glass-numeric block text-xs" style={{ color: "var(--glass-txt-muted)" }}>
           Battlemap Name
         </label>
         <input
@@ -385,24 +385,24 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
           onChange={(event) => setNameValue(event.target.value)}
           onBlur={handleNameSave}
           disabled={!currentBattlemap || disabled}
-          className="parchment-body w-full border px-2 py-2 focus:outline-none disabled:opacity-50"
-          style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
+          className="glass-body w-full border px-2 py-2 focus:outline-none disabled:opacity-50"
+          style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt)", background: "rgba(255,255,255,0.04)" }}
           placeholder="Enter a name"
         />
-        <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+        <p className="glass-muted text-xs" style={{ color: "var(--glass-txt-muted)" }}>
           Changes are saved automatically when the field loses focus.
         </p>
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="parchment-numeric block text-xs" style={{ color: "var(--parchment-ink-muted)" }}>Floors</label>
+          <label className="glass-numeric block text-xs" style={{ color: "var(--glass-txt-muted)" }}>Floors</label>
           <button
             type="button"
             onClick={handleAddFloor}
             disabled={!currentBattlemap || disabled || !canManageBattlemaps}
-            className="parchment-numeric text-xs border px-2 py-1 transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-50"
-            style={{ color: "var(--brass-shadow)", borderColor: "var(--brass-deep)", background: "rgba(255, 252, 240, 0.4)" }}
+            className="glass-numeric text-xs border px-2 py-1 transition-colors hover:bg-[var(--glass-highlight)] disabled:opacity-50"
+            style={{ color: "var(--glass-accent-deep)", borderColor: "var(--glass-accent)", background: "rgba(255,255,255,0.04)" }}
           >
             + Add Floor
           </button>
@@ -410,15 +410,15 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
 
         {!currentBattlemap ? (
           <div
-            className="parchment-flavor w-full px-3 py-3 text-sm border"
-            style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+            className="glass-muted w-full px-3 py-3 text-sm border"
+            style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt-muted)", background: "rgba(255,255,255,0.04)" }}
           >
             Select a battlemap to manage floors.
           </div>
         ) : floors.length === 0 ? (
           <div
-            className="parchment-flavor w-full px-3 py-3 text-sm border"
-            style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+            className="glass-muted w-full px-3 py-3 text-sm border"
+            style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt-muted)", background: "rgba(255,255,255,0.04)" }}
           >
             No floors yet.
           </div>
@@ -433,11 +433,11 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
                     type="button"
                     onClick={() => handleFloorSelect(floor.id)}
                     disabled={disabled || !canManageBattlemaps}
-                    className="parchment-numeric border px-2 py-1 text-xs transition-colors disabled:opacity-50"
+                    className="glass-numeric border px-2 py-1 text-xs transition-colors disabled:opacity-50"
                     style={{
-                      color: isActive ? "var(--parchment-bright)" : "var(--brass-shadow)",
-                      borderColor: "var(--brass-deep)",
-                      background: isActive ? "var(--brass-deep)" : "rgba(255, 252, 240, 0.4)",
+                      color: isActive ? "var(--glass-bg-deep)" : "var(--glass-accent-deep)",
+                      borderColor: "var(--glass-accent)",
+                      background: isActive ? "var(--glass-accent)" : "rgba(255,255,255,0.04)",
                     }}
                     title={floor.name}
                   >
@@ -454,15 +454,15 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
                 onChange={(event) => setFloorNameValue(event.target.value)}
                 onBlur={handleFloorNameSave}
                 disabled={!activeFloorId || disabled || !canManageBattlemaps}
-                className="parchment-body flex-1 border px-2 py-2 focus:outline-none disabled:opacity-50"
-                style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
+                className="glass-body flex-1 border px-2 py-2 focus:outline-none disabled:opacity-50"
+                style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt)", background: "rgba(255,255,255,0.04)" }}
                 placeholder="Floor name"
               />
               <button
                 type="button"
                 onClick={handleDeleteFloor}
                 disabled={!activeFloorId || floors.length <= 1 || disabled || !canManageBattlemaps}
-                className="parchment-numeric border px-2 py-2 text-xs transition-colors hover:bg-[rgba(166,49,49,0.18)] disabled:opacity-50"
+                className="glass-numeric border px-2 py-2 text-xs transition-colors hover:bg-[rgba(166,49,49,0.18)] disabled:opacity-50"
                 style={{ color: "#7a2424", borderColor: "#7a2424", background: "rgba(166, 49, 49, 0.08)" }}
                 title={floors.length <= 1 ? "Cannot delete the last floor" : "Delete floor"}
               >
@@ -471,19 +471,19 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
             </div>
 
             {!canManageBattlemaps ? (
-              <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>Only the display host can change floors.</p>
+              <p className="glass-muted text-xs" style={{ color: "var(--glass-txt-muted)" }}>Only the display host can change floors.</p>
             ) : null}
           </>
         )}
       </div>
 
       <div className="space-y-2">
-        <label className="parchment-numeric block text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+        <label className="glass-numeric block text-xs" style={{ color: "var(--glass-txt-muted)" }}>
           Map Image
         </label>
         <div
-          className="parchment-flavor w-full border px-2 py-2 text-xs break-words min-h-[48px]"
-          style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink-muted)", background: "rgba(255, 252, 240, 0.4)" }}
+          className="glass-muted w-full border px-2 py-2 text-xs break-words min-h-[48px]"
+          style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt-muted)", background: "rgba(255,255,255,0.04)" }}
         >
           {currentBattlemap?.mapPath ? currentBattlemap.mapPath : "No image uploaded yet."}
         </div>
@@ -500,32 +500,32 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
             type="button"
             onClick={handleUploadClick}
             disabled={!currentBattlemap || !activeFloorId || disabled || isUploading}
-            className="parchment-numeric flex-1 border px-3 py-2 text-sm transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-50"
-            style={{ color: "var(--parchment-bright)", borderColor: "var(--brass-shadow)", background: "var(--brass-deep)" }}
+            className="glass-numeric flex-1 border px-3 py-2 text-sm transition-colors hover:bg-[var(--glass-highlight)] disabled:opacity-50"
+            style={{ color: "var(--glass-bg-deep)", borderColor: "var(--glass-accent-deep)", background: "var(--glass-accent)" }}
           >
             {isUploading ? "Uploading…" : currentBattlemap?.mapPath ? "Replace Image" : "Upload Image"}
           </button>
         </div>
-        <p className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+        <p className="glass-muted text-xs" style={{ color: "var(--glass-txt-muted)" }}>
           Drop in any image file—it&apos;s uploaded to Supabase storage and referenced automatically.
         </p>
       </div>
 
-      <form onSubmit={handleCreateBattlemap} className="space-y-2 pt-3" style={{ borderTop: "1px solid rgba(110, 83, 32, 0.3)" }}>
-        <h4 className="parchment-numeric text-xs" style={{ color: "var(--parchment-ink-muted)" }}>Create New Battlemap</h4>
+      <form onSubmit={handleCreateBattlemap} className="space-y-2 pt-3" style={{ borderTop: "1px solid var(--glass-border)" }}>
+        <h4 className="glass-numeric text-xs" style={{ color: "var(--glass-txt-muted)" }}>Create New Battlemap</h4>
         <input
           type="text"
           value={newBattlemapName}
           onChange={(event) => setNewBattlemapName(event.target.value)}
-          className="parchment-body w-full border px-2 py-2 focus:outline-none"
-          style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
+          className="glass-body w-full border px-2 py-2 focus:outline-none"
+          style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt)", background: "rgba(255,255,255,0.04)" }}
           placeholder="New battlemap name"
           required
         />
         <button
           type="submit"
-          className="parchment-numeric w-full border px-3 py-2 text-sm transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-50"
-          style={{ color: "var(--parchment-bright)", borderColor: "var(--brass-shadow)", background: "var(--brass-deep)" }}
+          className="glass-numeric w-full border px-3 py-2 text-sm transition-colors hover:bg-[var(--glass-highlight)] disabled:opacity-50"
+          style={{ color: "var(--glass-bg-deep)", borderColor: "var(--glass-accent-deep)", background: "var(--glass-accent)" }}
           disabled={isMutating}
         >
           Create Battlemap
@@ -533,7 +533,7 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
       </form>
 
       {statusMessage ? (
-        <div className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>{statusMessage}</div>
+        <div className="glass-muted text-xs" style={{ color: "var(--glass-txt-muted)" }}>{statusMessage}</div>
       ) : null}
     </div>
   );
@@ -578,18 +578,18 @@ const SortableBattlemapRow = ({
       ref={setNodeRef}
       style={{
         ...style,
-        borderColor: "var(--brass-deep)",
-        background: isDragging ? "rgba(201, 162, 74, 0.18)" : "rgba(255, 252, 240, 0.4)",
-        boxShadow: isDragging ? "0 4px 14px rgba(110, 83, 32, 0.25)" : undefined,
+        borderColor: "var(--glass-accent)",
+        background: isDragging ? "var(--glass-highlight)" : "rgba(255,255,255,0.04)",
+        boxShadow: isDragging ? "0 4px 14px var(--glass-border)" : undefined,
       }}
       className="flex items-stretch gap-2 border p-2 transition"
     >
       <div
         {...dragHandleProps}
         className={`flex items-center px-2 transition ${
-          dragEnabled ? "cursor-grab hover:text-[var(--brass-shadow)]" : "cursor-not-allowed opacity-30"
+          dragEnabled ? "cursor-grab hover:text-[var(--glass-accent-deep)]" : "cursor-not-allowed opacity-30"
         }`}
-        style={{ color: "var(--brass-deep)" }}
+        style={{ color: "var(--glass-accent)" }}
         aria-label={dragEnabled ? "Drag to reorder" : "Reordering disabled"}
       >
         <DragHandleIcon />
@@ -599,39 +599,39 @@ const SortableBattlemapRow = ({
         onClick={() => onSelect(battlemap.id)}
         disabled={disabled}
         className={`flex flex-1 items-center gap-3 border px-2 py-1.5 text-left transition-colors ${
-          disabled ? "opacity-60" : "hover:bg-[rgba(201,162,74,0.12)]"
+          disabled ? "opacity-60" : "hover:bg-[var(--glass-highlight)]"
         }`}
         style={{
-          borderColor: isActive ? "var(--brass-shadow)" : "transparent",
-          background: isActive ? "rgba(201, 162, 74, 0.18)" : "transparent",
+          borderColor: isActive ? "var(--glass-accent-deep)" : "transparent",
+          background: isActive ? "var(--glass-highlight)" : "transparent",
         }}
       >
         <span
           className="flex h-10 w-10 items-center justify-center border"
           style={{
-            borderColor: "var(--brass-deep)",
-            background: "linear-gradient(135deg, rgba(201, 162, 74, 0.25), rgba(110, 83, 32, 0.1))",
-            color: "var(--brass-shadow)",
+            borderColor: "var(--glass-accent)",
+            background: "linear-gradient(135deg, var(--glass-highlight), var(--glass-border))",
+            color: "var(--glass-accent-deep)",
           }}
         >
           <MapBadgeIcon />
         </span>
         <div className="flex flex-1 flex-col overflow-hidden">
-          <span className="parchment-body text-sm font-medium" style={{ color: "var(--parchment-ink)" }}>
+          <span className="glass-body text-sm font-medium" style={{ color: "var(--glass-txt)" }}>
             {battlemap.name || "Untitled Battlemap"}
           </span>
-          <span className="parchment-flavor text-xs truncate" style={{ color: "var(--parchment-ink-muted)" }}>
+          <span className="glass-muted text-xs truncate" style={{ color: "var(--glass-txt-muted)" }}>
             {battlemap.mapPath ? battlemap.mapPath : "No image uploaded"}
           </span>
         </div>
         {isActive ? (
           <span
-            className="parchment-numeric border px-2 py-0.5"
+            className="glass-numeric border px-2 py-0.5"
             style={{
               fontSize: "0.65rem",
-              color: "var(--parchment-bright)",
-              borderColor: "var(--brass-shadow)",
-              background: "var(--brass-deep)",
+              color: "var(--glass-bg-deep)",
+              borderColor: "var(--glass-accent-deep)",
+              background: "var(--glass-accent)",
             }}
           >
             Active

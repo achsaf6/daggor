@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Floor picker — design comparison</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: #0e0e10; color: #e6e6e6;
+    font-family: Geist, Inter, -apple-system, system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  .header {
+    padding: 18px 28px;
+    border-bottom: 1px solid #2a2a30;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .header h1 {
+    font-size: 14px; font-weight: 600; margin: 0;
+    letter-spacing: 0.04em;
+  }
+  .header h1 .muted { color: #888; font-weight: 400; margin-left: 8px; }
+  main {
+    padding: 32px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 32px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  /* ─── shared mockup card ─── */
+  .card {
+    background: #16161a;
+    border: 1px solid #2a2a30;
+    border-radius: 12px;
+    padding: 0;
+    overflow: hidden;
+  }
+  .card-head {
+    padding: 14px 18px;
+    border-bottom: 1px solid #2a2a30;
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  .card-head .label {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #f4f4f5;
+  }
+  .card-head .tag {
+    font-size: 11px; color: #888; font-weight: 400;
+    letter-spacing: 0; text-transform: none;
+  }
+  .card-frame {
+    height: 380px;
+    background:
+      radial-gradient(ellipse 70% 50% at 35% 40%, oklch(0.42 0.05 95 / 0.9) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 70% 70%, oklch(0.30 0.04 60 / 0.7) 0%, transparent 50%),
+      linear-gradient(155deg, oklch(0.22 0.03 70), oklch(0.16 0.02 50));
+    position: relative;
+  }
+  .card-frame::after {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 5% 5%;
+    pointer-events: none;
+  }
+  .card-notes {
+    padding: 14px 18px;
+    border-top: 1px solid #2a2a30;
+    font-size: 12px; line-height: 1.6;
+    color: #cfcfd4;
+  }
+  .card-notes strong { color: #f4f4f5; font-weight: 600; }
+  .card-notes .pro { color: #6ee7b7; }
+  .card-notes .con { color: #fb7185; }
+
+  /* ─── glass tokens (mirrors app/globals.css) ─── */
+  :root {
+    --glass-bg: rgba(20, 18, 16, 0.55);
+    --glass-bg-deep: rgba(20, 18, 16, 0.78);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-border-bright: rgba(255, 255, 255, 0.16);
+    --glass-highlight: rgba(255, 255, 255, 0.12);
+    --glass-accent: oklch(0.72 0.13 220);
+    --glass-accent-soft: oklch(0.72 0.13 220 / 0.22);
+    --glass-txt: oklch(0.95 0 0);
+    --glass-txt-muted: oklch(0.62 0 0);
+    --glass-txt-faint: oklch(0.45 0 0);
+    --glass-radius: 14px;
+  }
+
+  .glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--glass-radius);
+    color: var(--glass-txt);
+    box-shadow: 0 12px 36px -12px rgba(0,0,0,0.5);
+    position: relative;
+  }
+  .glass-panel::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--glass-highlight) 50%, transparent);
+    pointer-events: none;
+  }
+
+  /* ─── shared toolbar layout ─── */
+  .toolbar {
+    position: absolute; left: 16px; top: 50%;
+    transform: translateY(-50%);
+    padding: 6px;
+    display: flex; flex-direction: column; gap: 4px;
+    z-index: 10;
+  }
+  .tool {
+    width: 36px; height: 36px;
+    display: grid; place-items: center;
+    border-radius: 8px;
+    color: var(--glass-txt-muted);
+    cursor: pointer;
+    position: relative;
+    transition: all 120ms;
+  }
+  .tool:hover { background: var(--glass-highlight); color: var(--glass-txt); }
+  .tool.active { background: var(--glass-accent-soft); color: var(--glass-accent); }
+  .tool svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.75; }
+  .tool .badge {
+    position: absolute;
+    top: 4px; right: 4px;
+    min-width: 14px; height: 14px;
+    border-radius: 7px;
+    background: var(--glass-accent);
+    color: #0e0e10;
+    font-size: 9px; font-weight: 700;
+    display: grid; place-items: center;
+    padding: 0 3px;
+    line-height: 1;
+  }
+  .sep {
+    width: 24px; height: 1px;
+    background: var(--glass-border);
+    margin: 4px auto;
+  }
+
+  /* ─── flyout (Option A) ─── */
+  .flyout {
+    position: absolute;
+    left: 60px;
+    padding: 6px;
+    min-width: 160px;
+    z-index: 11;
+  }
+  .flyout-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--glass-txt);
+    transition: background 120ms;
+  }
+  .flyout-row:hover { background: var(--glass-highlight); }
+  .flyout-row.active {
+    background: var(--glass-accent-soft);
+    color: var(--glass-accent);
+  }
+  .flyout-row .check {
+    width: 12px; height: 12px;
+    display: grid; place-items: center;
+    color: var(--glass-accent);
+  }
+  .flyout-row .check svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2.5; }
+  .flyout-row.muted .check { visibility: hidden; }
+  .flyout-divider {
+    height: 1px;
+    background: var(--glass-border);
+    margin: 4px 8px;
+  }
+  .flyout-add {
+    color: var(--glass-txt-muted);
+    font-size: 12px;
+  }
+
+  /* ─── compact pill (Option B) ─── */
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    height: 36px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--glass-border);
+  }
+  .pill button {
+    width: 22px; height: 36px;
+    background: transparent; border: 0; cursor: pointer;
+    display: grid; place-items: center;
+    color: var(--glass-txt-muted);
+    transition: background 120ms;
+  }
+  .pill button:hover { background: var(--glass-highlight); color: var(--glass-txt); }
+  .pill button svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .pill .name {
+    flex: 1;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--glass-txt);
+    padding: 0 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ─── option D: minimal arrows ─── */
+  .arrow-row {
+    display: flex; align-items: center; justify-content: center;
+    height: 36px;
+    gap: 4px;
+  }
+  .arrow-row button {
+    width: 22px; height: 28px;
+    background: transparent; border: 0; cursor: pointer;
+    display: grid; place-items: center;
+    color: var(--glass-txt-muted);
+    border-radius: 4px;
+  }
+  .arrow-row button:hover { color: var(--glass-txt); background: var(--glass-highlight); }
+  .arrow-row svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .arrow-row .num {
+    font-size: 12px; font-weight: 600;
+    color: var(--glass-txt);
+    width: 18px; text-align: center;
+    font-feature-settings: 'tnum';
+  }
+
+  /* ─── current (for reference) ─── */
+  .current-stack {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 4px;
+  }
+  .current-stack .arrow {
+    width: 36px; height: 36px;
+    display: grid; place-items: center;
+    color: var(--glass-txt-muted);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .current-stack .arrow svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.75; }
+  .current-stack .num {
+    font-size: 8.8px;
+    color: var(--glass-txt-muted);
+    text-align: center;
+    line-height: 1.2;
+    font-feature-settings: 'tnum';
+  }
+
+  /* highlight box around the floor area in each mockup */
+  .highlight {
+    position: absolute;
+    left: -4px; right: -4px;
+    border: 1.5px dashed var(--glass-accent);
+    border-radius: 6px;
+    pointer-events: none;
+    opacity: 0.5;
+  }
+
+  .map-marker {
+    position: absolute;
+    bottom: 18px; right: 18px;
+    color: var(--glass-txt-faint);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Floor picker <span class="muted">— design comparison</span></h1>
+  <div style="font-size: 12px; color: #888;">All mockups show toolbar with 2 floors</div>
+</div>
+
+<main>
+
+  <!-- ─────────────────────────────────────────────────────────
+       BASELINE — what's there now
+       ───────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <span class="label">Current (baseline)</span>
+      <span class="tag">3 vertical slots, tiny readout</span>
+    </div>
+    <div class="card-frame">
+      <div class="toolbar glass-panel">
+        <div class="tool" title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+        <div class="tool" title="Maps"><svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+        <div class="sep"></div>
+        <div class="current-stack" style="position: relative;">
+          <div class="highlight" style="top: -2px; bottom: -2px;"></div>
+          <div class="arrow"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></div>
+          <div class="num">2/2</div>
+          <div class="arrow"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></div>
+        </div>
+        <div class="sep"></div>
+        <div class="tool" title="Tokens" style="color: var(--glass-accent);">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>
+        </div>
+        <div class="tool" title="Spawn"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg></div>
+        <div class="tool" title="Fog"><svg viewBox="0 0 24 24"><path d="M4 14a4 4 0 0 1 4-4 5 5 0 0 1 9.6-1A4 4 0 0 1 20 17H6a3 3 0 0 1-2-3z"/></svg></div>
+      </div>
+      <span class="map-marker">battlemap</span>
+    </div>
+    <div class="card-notes">
+      <strong>What's wrong:</strong> 3 vertical slots in a ribbon meant for icon buttons (highlighted dashed). The "2/2" readout is 0.55rem — barely readable. No floor name. Toolbar height grows with floor controls always visible.
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────
+       OPTION A — Button + flyout list
+       ───────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <span class="label">A · Button + flyout list <span style="color: #6ee7b7;">(recommended)</span></span>
+      <span class="tag">1 slot · click for full list</span>
+    </div>
+    <div class="card-frame">
+      <div class="toolbar glass-panel">
+        <div class="tool" title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+        <div class="tool" title="Maps"><svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+        <div class="sep"></div>
+        <div class="tool active" title="Floors" style="position: relative;">
+          <div class="highlight" style="top: -2px; bottom: -2px;"></div>
+          <svg viewBox="0 0 24 24"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M3 7l9 5 9-5M3 7l9-4 9 4"/></svg>
+          <span class="badge">2</span>
+        </div>
+        <div class="sep"></div>
+        <div class="tool" title="Tokens" style="color: var(--glass-accent);"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></div>
+        <div class="tool" title="Spawn"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg></div>
+        <div class="tool" title="Fog"><svg viewBox="0 0 24 24"><path d="M4 14a4 4 0 0 1 4-4 5 5 0 0 1 9.6-1A4 4 0 0 1 20 17H6a3 3 0 0 1-2-3z"/></svg></div>
+      </div>
+      <!-- flyout, opened state -->
+      <div class="flyout glass-panel" style="top: 218px;">
+        <div class="flyout-row active">
+          <span class="check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <span>Floor 2 · Crypt</span>
+        </div>
+        <div class="flyout-row muted">
+          <span class="check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <span>Floor 1 · Foyer</span>
+        </div>
+        <div class="flyout-divider"></div>
+        <div class="flyout-row flyout-add muted">
+          <span class="check"></span>
+          <span>+ Add floor</span>
+        </div>
+      </div>
+      <span class="map-marker">battlemap</span>
+    </div>
+    <div class="card-notes">
+      <span class="pro">Pros:</span> 1 slot. Same pattern as Settings/Maps flyouts. Scales to 5+ floors. Shows real floor names. Active floor checked.<br>
+      <span class="con">Cons:</span> Two clicks to switch floors (open + select). Worth it if you don't switch frequently mid-encounter.
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────
+       OPTION B — Compact horizontal pill
+       ───────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <span class="label">B · Compact horizontal pill</span>
+      <span class="tag">1 slot · arrows + name inline</span>
+    </div>
+    <div class="card-frame">
+      <div class="toolbar glass-panel" style="width: 110px;">
+        <div class="tool" style="margin: 0 auto;" title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+        <div class="tool" style="margin: 0 auto;" title="Maps"><svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+        <div class="sep" style="width: 80px;"></div>
+        <div style="position: relative;">
+          <div class="highlight" style="top: -2px; bottom: -2px;"></div>
+          <div class="pill">
+            <button title="Previous floor"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <span class="name">Crypt</span>
+            <button title="Next floor"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+          </div>
+        </div>
+        <div class="sep" style="width: 80px;"></div>
+        <div class="tool" style="margin: 0 auto; color: var(--glass-accent);" title="Tokens"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></div>
+        <div class="tool" style="margin: 0 auto;" title="Spawn"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg></div>
+        <div class="tool" style="margin: 0 auto;" title="Fog"><svg viewBox="0 0 24 24"><path d="M4 14a4 4 0 0 1 4-4 5 5 0 0 1 9.6-1A4 4 0 0 1 20 17H6a3 3 0 0 1-2-3z"/></svg></div>
+      </div>
+      <span class="map-marker">battlemap</span>
+    </div>
+    <div class="card-notes">
+      <span class="pro">Pros:</span> One click to switch floors. Floor name visible at all times. Same height as other tools.<br>
+      <span class="con">Cons:</span> Forces the toolbar wider (~110px vs 62px) to fit the name. Long floor names truncate.
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────
+       OPTION C — Badge on Layers icon
+       ───────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <span class="label">C · Badge on Layers icon</span>
+      <span class="tag">0 extra slots · floors live in Maps flyout</span>
+    </div>
+    <div class="card-frame">
+      <div class="toolbar glass-panel">
+        <div class="tool" title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+        <div class="tool" title="Maps · Floor 2 of 2" style="position: relative;">
+          <div class="highlight" style="top: -2px; bottom: -2px;"></div>
+          <svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          <span class="badge">2</span>
+        </div>
+        <div class="sep"></div>
+        <div class="tool" title="Tokens" style="color: var(--glass-accent);"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></div>
+        <div class="tool" title="Spawn"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg></div>
+        <div class="tool" title="Fog"><svg viewBox="0 0 24 24"><path d="M4 14a4 4 0 0 1 4-4 5 5 0 0 1 9.6-1A4 4 0 0 1 20 17H6a3 3 0 0 1-2-3z"/></svg></div>
+      </div>
+      <!-- BattlemapManager-style flyout showing floors INSIDE it -->
+      <div class="flyout glass-panel" style="top: 60px; width: 280px; padding: 14px 16px;">
+        <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--glass-txt-muted); margin-bottom: 10px;">
+          Stormwreck Isle
+        </div>
+        <div style="font-size: 10px; color: var(--glass-txt-faint); margin-bottom: 8px; letter-spacing: 0.04em; text-transform: uppercase;">Floors</div>
+        <div class="flyout-row active" style="padding: 6px 8px;">
+          <span class="check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <span style="font-size: 12px;">Floor 2 · Crypt</span>
+        </div>
+        <div class="flyout-row muted" style="padding: 6px 8px;">
+          <span class="check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <span style="font-size: 12px;">Floor 1 · Foyer</span>
+        </div>
+        <div class="flyout-divider"></div>
+        <div style="font-size: 10px; color: var(--glass-txt-faint); padding: 4px 8px;">
+          + add floor &nbsp;·&nbsp; rename &nbsp;·&nbsp; delete
+        </div>
+      </div>
+      <span class="map-marker">battlemap</span>
+    </div>
+    <div class="card-notes">
+      <span class="pro">Pros:</span> Smallest footprint — toolbar drops to 5 slots. Single source of truth for floors (lives with the map they belong to). Badge gives at-a-glance floor count.<br>
+      <span class="con">Cons:</span> 2 clicks + visual hop to the manager flyout to switch floors. Worse if you switch every turn.
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────
+       OPTION D — Fix size only
+       ───────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <span class="label">D · Fix size only</span>
+      <span class="tag">1 slot · ‹ 2 ›, name in tooltip</span>
+    </div>
+    <div class="card-frame">
+      <div class="toolbar glass-panel">
+        <div class="tool" title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+        <div class="tool" title="Maps"><svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+        <div class="sep"></div>
+        <div style="position: relative;">
+          <div class="highlight" style="top: -2px; bottom: -2px;"></div>
+          <div class="arrow-row" title="Floor 2 of 2 · Crypt">
+            <button><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <span class="num">2</span>
+            <button><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+          </div>
+        </div>
+        <div class="sep"></div>
+        <div class="tool" title="Tokens" style="color: var(--glass-accent);"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></div>
+        <div class="tool" title="Spawn"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg></div>
+        <div class="tool" title="Fog"><svg viewBox="0 0 24 24"><path d="M4 14a4 4 0 0 1 4-4 5 5 0 0 1 9.6-1A4 4 0 0 1 20 17H6a3 3 0 0 1-2-3z"/></svg></div>
+      </div>
+      <span class="map-marker">battlemap</span>
+    </div>
+    <div class="card-notes">
+      <span class="pro">Pros:</span> Smallest change from current. One-click prev/next. Toolbar stays 62px wide.<br>
+      <span class="con">Cons:</span> No floor name visible — only number. Tooltip on hover for context. Bare-bones.
+    </div>
+  </div>
+
+</main>
+
+</body>
+</html>

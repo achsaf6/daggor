@@ -19,8 +19,8 @@ export const GridSizeSlider = ({
   return (
     <div>
       <label className="flex items-center justify-between text-xs mb-2">
-        <span className="parchment-numeric" style={{ color: "var(--parchment-ink-muted)" }}>Grid size</span>
-        <span className="parchment-numeric" style={{ color: "var(--brass-shadow)" }}>{value.toFixed(2)}×</span>
+        <span className="glass-numeric" style={{ color: "var(--glass-txt-muted)" }}>Grid size</span>
+        <span className="glass-numeric" style={{ color: "var(--glass-accent-deep)" }}>{value.toFixed(2)}×</span>
       </label>
       <input
         type="range"
@@ -31,11 +31,11 @@ export const GridSizeSlider = ({
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
         style={{
-          background: `linear-gradient(to right, var(--brass-deep) 0%, var(--brass-deep) ${pct}%, rgba(110, 83, 32, 0.18) ${pct}%, rgba(110, 83, 32, 0.18) 100%)`,
-          accentColor: "var(--brass-deep)",
+          background: `linear-gradient(to right, var(--glass-accent) 0%, var(--glass-accent) ${pct}%, var(--glass-border) ${pct}%, var(--glass-border) 100%)`,
+          accentColor: "var(--glass-accent)",
         }}
       />
-      <div className="parchment-flavor flex justify-between mt-1" style={{ fontSize: "0.65rem", color: "var(--parchment-ink-muted)" }}>
+      <div className="glass-muted flex justify-between mt-1" style={{ fontSize: "0.65rem", color: "var(--glass-txt-muted)" }}>
         <span>Smaller</span>
         <span>Larger</span>
       </div>

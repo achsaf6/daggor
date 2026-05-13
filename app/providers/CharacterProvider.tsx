@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -68,6 +69,14 @@ export const CharacterProvider = ({ children }: { children: ReactNode }) => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  // Always-current character pointer. updateCharacter awaits Supabase, and we
+  // need to know "is the user still on the row I'm updating?" when it
+  // resolves — otherwise a mid-update character switch would have the
+  // success branch overwrite the new selection with the old row's data.
+  const characterRef = useRef<CharacterProfile | null>(null);
+  useEffect(() => {
+    characterRef.current = character;
+  }, [character]);
 
   const selectCharacter = useCallback(async (rawName: string) => {
     const normalized = rawName.trim();
@@ -127,7 +136,11 @@ export const CharacterProvider = ({ children }: { children: ReactNode }) => {
 
   const updateCharacter = useCallback(
     async (updates: CharacterUpdates) => {
-      if (!character) {
+      // Capture the target at call time. A character switch during the
+      // Supabase round-trip MUST NOT cause the success branch to clobber
+      // the new selection with the old row's data.
+      const target = characterRef.current;
+      if (!target) {
         return null;
       }
 
@@ -149,7 +162,7 @@ export const CharacterProvider = ({ children }: { children: ReactNode }) => {
 
       if (Object.keys(payload).length === 1) {
         // Only updated_at was added, nothing else to update.
-        return character;
+        return target;
       }
 
       setIsUpdating(true);
@@ -159,7 +172,7 @@ export const CharacterProvider = ({ children }: { children: ReactNode }) => {
         const { data, error } = await supabase
           .from("characters")
           .update(payload)
-          .eq("id", character.id)
+          .eq("id", target.id)
           .select("*")
           .single();
 
@@ -168,7 +181,10 @@ export const CharacterProvider = ({ children }: { children: ReactNode }) => {
         }
 
         const profile = mapRowToProfile(data as CharacterRow);
-        setCharacter(profile);
+        // Only commit to state if the user is still on this character.
+        if (characterRef.current?.id === target.id) {
+          setCharacter(profile);
+        }
         return profile;
       } catch (err) {
         console.error("Failed to update character", err);
@@ -180,7 +196,7 @@ export const CharacterProvider = ({ children }: { children: ReactNode }) => {
         setIsUpdating(false);
       }
     },
-    [character]
+    []
   );
 
   const clearCharacter = useCallback(() => {

@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { User, ImageBounds, Position, TokenSize } from "../../types";
 import { DraggableToken } from "./DraggableToken";
 
@@ -57,14 +58,20 @@ export const TokenManager = ({
 
 
   
-  const handleTokenContextMenu = (e: React.MouseEvent, persistentUserId: string) => {
-    // Right click to remove in display mode
-    if (isDisplay && onRemoveToken) {
-      e.preventDefault();
-      e.stopPropagation();
-      onRemoveToken(persistentUserId);
-    }
-  };
+  // Memoize so DraggableToken's prop identity is stable across parent
+  // re-renders. Without this, every token's onContextMenu changed each render
+  // and propagated re-renders through the whole token grid.
+  const handleTokenContextMenu = useCallback(
+    (e: React.MouseEvent, persistentUserId: string) => {
+      // Right click to remove in display mode
+      if (isDisplay && onRemoveToken) {
+        e.preventDefault();
+        e.stopPropagation();
+        onRemoveToken(persistentUserId);
+      }
+    },
+    [isDisplay, onRemoveToken]
+  );
 
   return (
     <>

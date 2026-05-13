@@ -65,7 +65,7 @@ export const HorizontalSquaresInput = ({
   return (
     <div className="mb-4">
       <label className="flex items-center justify-between text-xs mb-2">
-        <span className="parchment-numeric" style={{ color: "var(--parchment-ink-muted)" }}>Horizontal squares</span>
+        <span className="glass-numeric" style={{ color: "var(--glass-txt-muted)" }}>Horizontal squares</span>
       </label>
       <input
         type="number"
@@ -75,11 +75,11 @@ export const HorizontalSquaresInput = ({
         onChange={(e) => handleHorizontalSquaresChange(e.target.value)}
         onBlur={handleInputBlur}
         onKeyDown={handleInputKeyDown}
-        className="parchment-numeric w-full border px-3 py-2 text-sm focus:outline-none"
-        style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
+        className="glass-numeric w-full border px-3 py-2 text-sm focus:outline-none"
+        style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt)", background: "rgba(255,255,255,0.04)" }}
         placeholder="0"
       />
-      <div className="parchment-flavor mt-1.5" style={{ fontSize: "0.75rem", color: "var(--parchment-ink-muted)" }}>
+      <div className="glass-muted mt-1.5" style={{ fontSize: "0.75rem", color: "var(--glass-txt-muted)" }}>
         Squares that fit across the map width
       </div>
     </div>

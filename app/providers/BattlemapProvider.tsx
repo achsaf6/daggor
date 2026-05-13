@@ -13,6 +13,7 @@ import { io, Socket } from "socket.io-client";
 import { useViewMode } from "../hooks/useViewMode";
 import { isDmSurface, useSurface } from "../hooks/useSurface";
 import { GridData, sanitizeGridData } from "../utils/gridData";
+import { prefetchImage as sharedPrefetchImage } from "../utils/prefetchImage";
 
 const clampValue = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -89,6 +90,7 @@ interface BattlemapContextValue {
   renameBattlemapImage: (imageId: string, name: string) => Promise<void>;
   deleteBattlemapImage: (imageId: string) => Promise<void>;
   updateBattlemapSettings: (updates: Partial<BattlemapSettings>) => void;
+  detectAndApplyGrid: () => Promise<DetectGridResult>;
   createBattlemap: (input: CreateBattlemapInput) => Promise<BattlemapSummary | null>;
   syncBattlemapFromServer: (battlemapId: string | null) => void;
   deleteBattlemap: (battlemapId: string) => Promise<void>;
@@ -100,6 +102,10 @@ interface BattlemapContextValue {
   clearFog: () => Promise<void>;
   canManageBattlemaps: boolean;
 }
+
+export type DetectGridResult =
+  | { ok: true; spacing: { x: number; y: number }; confidence: number }
+  | { ok: false; reason: "no-image" | "low-confidence" | "request-failed" };
 
 interface BattlemapPayload {
   id: string;
@@ -130,9 +136,14 @@ const sanitizeSpawnArea = (input: Partial<SpawnArea> | null | undefined): SpawnA
 
 const BattlemapContext = createContext<BattlemapContextValue | undefined>(undefined);
 
-const debugLog = (...args: unknown[]) => {
-  console.log("[BattlemapProvider]", ...args);
-};
+// Dev-only diagnostic logger. Production builds elide this so battlemap
+// switching, fog edits, etc. don't spam the user's console / log aggregator.
+const debugLog =
+  process.env.NODE_ENV === "production"
+    ? () => {}
+    : (...args: unknown[]) => {
+        console.log("[BattlemapProvider]", ...args);
+      };
 
 const getWebSocketUrl = () => {
   if (process.env.NEXT_PUBLIC_WS_URL) {
@@ -241,21 +252,17 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
   const socketRef = useRef<Socket | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const persistentUserIdRef = useRef<string | null>(null);
-  // Tracks URLs already kicked off via `new Image()` so re-renders don't
-  // refire the same request. Backed by the browser's HTTP cache; this set
-  // only suppresses duplicate work in the JS layer.
-  const prefetchedImagesRef = useRef<Set<string>>(new Set());
 
-  const prefetchImage = useCallback((url: string | null | undefined) => {
-    if (typeof window === "undefined") return;
-    if (!url) return;
-    const set = prefetchedImagesRef.current;
-    if (set.has(url)) return;
-    set.add(url);
-    const img = new Image();
-    img.decoding = "async";
-    img.src = url;
-  }, []);
+  // Backed by the shared `<link rel="preload">` helper — see
+  // app/utils/prefetchImage.ts for why the link-based approach replaces the
+  // earlier `new Image()` flavor (some browsers deprioritized / GC'd it).
+  // Wrapping in useCallback so consumers (effects) get a stable reference.
+  const prefetchImage = useCallback(
+    (url: string | null | undefined) => {
+      sharedPrefetchImage(url);
+    },
+    []
+  );
 
   const clearDebounceTimer = useCallback(() => {
     if (debounceTimerRef.current) {
@@ -264,8 +271,16 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
     }
   }, []);
 
+  // Tracks whether the provider is still mounted. The settings-update flow
+  // schedules a 500ms debounced emit that returns a Promise; if the user
+  // closes the tab between "timer fires" and "emit acks", the .finally
+  // handler would try to setState on a torn-down provider. We check this
+  // ref before any post-await state mutation.
+  const isMountedRef = useRef(true);
+
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
       clearDebounceTimer();
     };
   }, [clearDebounceTimer]);
@@ -701,16 +716,21 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       if (nextSettings) {
         clearDebounceTimer();
         debounceTimerRef.current = setTimeout(() => {
+          // Provider may have unmounted between scheduling and firing — bail
+          // out of the emit entirely rather than reject on a torn-down socket.
+          if (!isMountedRef.current) return;
           setIsSettingsSaving(true);
           emitWithAck("battlemap:update-settings", {
             battlemapId: currentBattlemapId,
             ...nextSettings,
           })
             .catch((settingsError) => {
+              if (!isMountedRef.current) return;
               console.error("Failed to update battlemap settings", settingsError);
               setError("Failed to update battlemap settings");
             })
             .finally(() => {
+              if (!isMountedRef.current) return;
               setIsSettingsSaving(false);
             });
         }, 500);
@@ -718,6 +738,78 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
     },
     [currentBattlemapId, clearDebounceTimer, emitWithAck]
   );
+
+  const detectAndApplyGrid = useCallback(async (): Promise<DetectGridResult> => {
+    if (!currentBattlemapId || !currentBattlemap) {
+      return { ok: false, reason: "no-image" };
+    }
+    const activeImage = currentBattlemap.images.find(
+      (img) => img.id === currentBattlemap.activeImageId
+    );
+    const path = activeImage?.mapPath || currentBattlemap.mapPath;
+    if (!path) {
+      return { ok: false, reason: "no-image" };
+    }
+
+    let detected: {
+      verticalLines: number[];
+      horizontalLines: number[];
+      imageWidth: number;
+      imageHeight: number;
+      confidence: number;
+      spacing: { x: number; y: number };
+    } | null = null;
+    try {
+      const res = await fetch(`/api/gridlines?path=${encodeURIComponent(path)}`);
+      if (!res.ok) return { ok: false, reason: "request-failed" };
+      detected = await res.json();
+    } catch {
+      return { ok: false, reason: "request-failed" };
+    }
+    if (
+      !detected ||
+      detected.verticalLines.length === 0 ||
+      detected.horizontalLines.length === 0
+    ) {
+      return { ok: false, reason: "low-confidence" };
+    }
+
+    // Replace gridData with detected lines, then reset scale/offset multipliers
+    // so the rendered grid matches the printed grid 1:1.
+    try {
+      await emitWithAck("battlemap:update-grid-data", {
+        battlemapId: currentBattlemapId,
+        gridData: {
+          verticalLines: detected.verticalLines,
+          horizontalLines: detected.horizontalLines,
+          imageWidth: detected.imageWidth,
+          imageHeight: detected.imageHeight,
+        },
+      });
+    } catch (err) {
+      console.error("Failed to apply detected grid", err);
+      return { ok: false, reason: "request-failed" };
+    }
+
+    // updateBattlemapSettings is debounced; emit directly so the reset lands
+    // before the user has a chance to nudge anything.
+    clearDebounceTimer();
+    setCurrentBattlemap((prev) =>
+      prev ? { ...prev, gridScale: 1, gridOffsetX: 0, gridOffsetY: 0 } : prev
+    );
+    try {
+      await emitWithAck("battlemap:update-settings", {
+        battlemapId: currentBattlemapId,
+        gridScale: 1,
+        gridOffsetX: 0,
+        gridOffsetY: 0,
+      });
+    } catch (err) {
+      console.error("Failed to reset grid settings after detection", err);
+    }
+
+    return { ok: true, spacing: detected.spacing, confidence: detected.confidence };
+  }, [currentBattlemapId, currentBattlemap, emitWithAck, clearDebounceTimer]);
 
   const addFogArea = useCallback(
     async (shape: Omit<FogShape, "id">) => {
@@ -881,6 +973,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       renameBattlemapImage,
       deleteBattlemapImage,
       updateBattlemapSettings,
+      detectAndApplyGrid,
       createBattlemap,
       syncBattlemapFromServer,
       deleteBattlemap,
@@ -920,6 +1013,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       updateFogArea,
       clearFog,
       allowBattlemapMutations,
+      detectAndApplyGrid,
     ]
   );
 

@@ -19,15 +19,20 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronLeft, ChevronRight, GripVertical, RotateCcw, Swords } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  GripVertical,
+  RotateCcw,
+  Swords,
+} from "lucide-react";
 import { useInitiative } from "../../hooks/useInitiative";
 import { User } from "../../types";
-import { PanelFrame } from "../Theatrical/PanelFrame";
 
 interface InitiativePanelProps {
   socket: Socket | null;
-  // Active player + NPC tokens from useSocket — used to resolve colors and
-  // (when an entry's stored name is empty) fall back to a token-side label.
   activeUsers: Map<string, User>;
 }
 
@@ -36,15 +41,15 @@ interface RowMeta {
   fallbackName: string;
 }
 
-// Initiative tracker — auto-populated from connected players and DM-spawned
-// NPCs. The DM drags rows to reorder turn order, edits scores inline, and
-// steps next/prev. Server is authoritative; we only render `state` and emit
-// mutations.
+// Glass Atelier initiative tracker — collapsed default shows just `Now` and
+// `Next` with the round counter and turn controls. The DM can expand the full
+// sortable list above the strip when needed (drag-reorder, score edits).
+//
+// Server is authoritative; we only render `state` and emit mutations.
 export const InitiativePanel = ({ socket, activeUsers }: InitiativePanelProps) => {
   const { state, advance, reset, reorder, setScore } = useInitiative(socket);
+  const [isExpanded, setIsExpanded] = useState(false);
 
-  // Index by persistentUserId so we can resolve the color/name for each
-  // initiative entry (entries are keyed by persistentUserId server-side).
   const metaByPersistentId = useMemo(() => {
     const m = new Map<string, RowMeta>();
     for (const u of activeUsers.values()) {
@@ -73,94 +78,194 @@ export const InitiativePanel = ({ socket, activeUsers }: InitiativePanelProps) =
     reorder(arrayMove(ids, from, to));
   };
 
+  const current =
+    state.currentIndex >= 0 && state.currentIndex < state.entries.length
+      ? state.entries[state.currentIndex]
+      : null;
+  const next =
+    state.entries.length > 0
+      ? state.entries[(state.currentIndex + 1) % state.entries.length]
+      : null;
+
+  const labelFor = (entry: { tokenId: string; name: string }) => {
+    const meta = metaByPersistentId.get(entry.tokenId);
+    return entry.name || meta?.fallbackName || entry.tokenId.slice(0, 6);
+  };
+  const colorFor = (tokenId: string) =>
+    metaByPersistentId.get(tokenId)?.color ?? "#6b7280";
+
+  const empty = state.entries.length === 0;
+
   return (
-    <div className="parchment-panel fixed left-4 bottom-4 z-40 w-96 max-h-[60vh] overflow-visible">
-      <PanelFrame
-        title={
-          <>
-            <Swords
-              className="inline-block h-3.5 w-3.5 mr-2 -mt-0.5"
-              style={{ color: "var(--brass-deep)" }}
-            />
-            Initiative
-            {state.round > 0 && (
-              <span className="opacity-70"> — Round {state.round}</span>
-            )}
-          </>
-        }
-      />
-      <div className="px-5 pt-10 pb-5 overflow-y-auto max-h-[60vh]">
-        {state.entries.length === 0 ? (
-          <div className="parchment-flavor text-sm mb-3">
-            No combatants — connect players or spawn monsters.
+    <div
+      className="glass-panel fixed bottom-4 left-1/2 -translate-x-1/2 z-40"
+      style={{
+        minWidth: empty ? 360 : isExpanded ? 460 : 'auto',
+        maxWidth: 'min(90vw, 560px)',
+      }}
+    >
+      {/* expanded list (rendered above the strip when open) */}
+      {isExpanded && !empty && (
+        <div className="px-4 pt-3 pb-2 border-b border-[var(--glass-border)]">
+          <div className="flex items-center justify-between mb-2">
+            <div className="glass-heading flex items-center gap-1.5">
+              <Swords className="h-3 w-3" />
+              Order
+              {state.round > 0 && (
+                <span className="opacity-70 normal-case tracking-normal">
+                  · Round {state.round}
+                </span>
+              )}
+            </div>
           </div>
-        ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={state.entries.map((e) => e.tokenId)} strategy={verticalListSortingStrategy}>
-              <ol className="flex flex-col mb-4">
-                {state.entries.map((entry, i) => {
-                  const meta = metaByPersistentId.get(entry.tokenId);
-                  return (
-                    <SortableRow
-                      key={entry.tokenId}
-                      tokenId={entry.tokenId}
-                      index={i}
-                      isCurrent={i === state.currentIndex}
-                      name={entry.name || meta?.fallbackName || entry.tokenId.slice(0, 6)}
-                      color={meta?.color ?? "#6b7280"}
-                      score={entry.score}
-                      onScoreChange={(next) => setScore(entry.tokenId, next)}
-                    />
-                  );
-                })}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={state.entries.map((e) => e.tokenId)}
+              strategy={verticalListSortingStrategy}
+            >
+              <ol className="flex flex-col">
+                {state.entries.map((entry, i) => (
+                  <SortableRow
+                    key={entry.tokenId}
+                    tokenId={entry.tokenId}
+                    index={i}
+                    isCurrent={i === state.currentIndex}
+                    name={labelFor(entry)}
+                    color={colorFor(entry.tokenId)}
+                    score={entry.score}
+                    onScoreChange={(n) => setScore(entry.tokenId, n)}
+                  />
+                ))}
               </ol>
             </SortableContext>
           </DndContext>
+        </div>
+      )}
+
+      {/* the always-visible strip */}
+      <div className="flex items-center gap-3 px-4 py-2.5">
+        {empty ? (
+          <span className="glass-muted text-xs">
+            No combatants — connect players or spawn monsters.
+          </span>
+        ) : (
+          <>
+            <span className="glass-numeric text-[10px] tracking-wider uppercase">
+              Rnd {state.round}
+            </span>
+
+            <div className="flex items-center gap-2">
+              <span className="glass-heading text-[10px]">Now</span>
+              {current && (
+                <>
+                  <span
+                    className="block rounded-full"
+                    style={{
+                      width: 12,
+                      height: 12,
+                      background: colorFor(current.tokenId),
+                      boxShadow:
+                        "0 0 0 1px rgba(0,0,0,0.4), 0 0 0 2px var(--glass-accent)",
+                    }}
+                    aria-hidden
+                  />
+                  <span className="glass-body text-sm font-medium truncate max-w-[120px]">
+                    {labelFor(current)}
+                  </span>
+                  <span className="glass-numeric text-xs">+{current.score}</span>
+                </>
+              )}
+            </div>
+
+            <ChevronRight
+              className="h-3.5 w-3.5"
+              style={{ color: "var(--glass-txt-faint)" }}
+              aria-hidden
+            />
+
+            <div className="flex items-center gap-1.5">
+              <span className="glass-heading text-[10px]">Next</span>
+              {next && (
+                <>
+                  <span
+                    className="block rounded-full"
+                    style={{
+                      width: 10,
+                      height: 10,
+                      background: colorFor(next.tokenId),
+                      boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
+                    }}
+                    aria-hidden
+                  />
+                  <span
+                    className="glass-body text-sm truncate max-w-[100px]"
+                    style={{ color: "var(--glass-txt-muted)" }}
+                  >
+                    {labelFor(next)}
+                  </span>
+                </>
+              )}
+            </div>
+          </>
         )}
 
-        <div className="flex gap-2 items-center">
+        <div className="flex items-center gap-1.5 ml-auto">
           <button
             type="button"
             onClick={() => advance("prev")}
-            disabled={state.entries.length === 0}
+            disabled={empty}
             aria-label="Previous turn"
-            className="parchment-numeric px-2 py-1 disabled:opacity-30 hover:text-[var(--brass-shadow)] transition-colors"
-            style={{ color: "var(--brass-deep)" }}
+            className="glass-btn glass-btn-icon"
+            style={{ width: 28, height: 28 }}
           >
-            <ChevronLeft className="h-4 w-4 inline" />
+            <ChevronLeft className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
             onClick={() => advance("next")}
-            disabled={state.entries.length === 0}
-            className="parchment-numeric flex-1 text-sm py-2 px-3 border disabled:opacity-30 hover:bg-[rgba(201,162,74,0.15)] transition-colors"
-            style={{
-              color: "var(--brass-shadow)",
-              borderColor: "var(--brass-deep)",
-              background: "rgba(255, 252, 240, 0.4)",
-            }}
+            disabled={empty}
+            className="glass-btn glass-btn-primary"
+            style={{ padding: "5px 12px", fontSize: 11 }}
           >
-            NEXT TURN
+            Next turn
           </button>
           <button
             type="button"
             onClick={() => advance("next")}
-            disabled={state.entries.length === 0}
-            aria-label="Next turn"
-            className="parchment-numeric px-2 py-1 disabled:opacity-30 hover:text-[var(--brass-shadow)] transition-colors"
-            style={{ color: "var(--brass-deep)" }}
+            disabled={empty}
+            aria-label="Skip"
+            className="glass-btn glass-btn-icon"
+            style={{ width: 28, height: 28 }}
           >
-            <ChevronRight className="h-4 w-4 inline" />
+            <ChevronRight className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
             onClick={reset}
-            disabled={state.entries.length === 0}
+            disabled={empty}
             aria-label="Reset to round 1"
-            className="parchment-numeric px-2 py-1 disabled:opacity-30 hover:text-[var(--brass-shadow)] transition-colors"
-            style={{ color: "var(--brass-deep)" }}
+            className="glass-btn glass-btn-icon"
+            style={{ width: 28, height: 28 }}
           >
-            <RotateCcw className="h-4 w-4 inline" />
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsExpanded((v) => !v)}
+            disabled={empty}
+            aria-label={isExpanded ? "Collapse list" : "Expand list"}
+            className="glass-btn glass-btn-icon"
+            style={{ width: 28, height: 28 }}
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronUp className="h-3.5 w-3.5" />
+            )}
           </button>
         </div>
       </div>
@@ -187,9 +292,8 @@ const SortableRow = ({
   score,
   onScoreChange,
 }: SortableRowProps) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tokenId });
-  // Local draft of the score so the user can tab through digits without the
-  // server clobbering each keystroke; we commit on blur / Enter.
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: tokenId });
   const [draft, setDraft] = useState<string>(String(score));
   useEffect(() => {
     setDraft(String(score));
@@ -199,13 +303,11 @@ const SortableRow = ({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    background: isCurrent
-      ? "linear-gradient(to right, rgba(201, 162, 74, 0.15), transparent)"
-      : "transparent",
-    borderColor: "rgba(110, 83, 32, 0.2)",
+    background: isCurrent ? "var(--glass-accent-soft)" : "transparent",
+    borderRadius: 6,
   };
 
-  const commitScore = () => {
+  const commit = () => {
     const parsed = Number.parseFloat(draft);
     onScoreChange(Number.isFinite(parsed) ? parsed : 0);
   };
@@ -214,11 +316,12 @@ const SortableRow = ({
     <li
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2.5 py-1.5 border-b last:border-b-0"
+      className="flex items-center gap-2 py-1.5 px-1"
     >
       <button
         type="button"
-        className="text-[var(--parchment-ink-muted)] hover:text-[var(--brass-shadow)] cursor-grab active:cursor-grabbing"
+        className="cursor-grab active:cursor-grabbing"
+        style={{ color: "var(--glass-txt-faint)" }}
         aria-label="Drag to reorder"
         {...attributes}
         {...listeners}
@@ -226,28 +329,24 @@ const SortableRow = ({
         <GripVertical className="h-3.5 w-3.5" />
       </button>
       <span
-        className="parchment-numeric w-5 text-right shrink-0"
-        style={{
-          fontSize: "0.95rem",
-          color: isCurrent ? "var(--brass-shadow)" : "var(--parchment-ink-muted)",
-        }}
+        className="glass-numeric w-5 text-right shrink-0 text-xs"
+        style={{ color: isCurrent ? "var(--glass-accent)" : "var(--glass-txt-faint)" }}
       >
         {index + 1}
       </span>
       <span
-        className="inline-block h-3 w-3 rounded-full shrink-0"
+        className="block rounded-full shrink-0"
         style={{
-          backgroundColor: color,
-          boxShadow: "0 0 0 1px var(--parchment-bright), 0 0 0 1.5px var(--brass-deep)",
+          width: 10,
+          height: 10,
+          background: color,
+          boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
         }}
         aria-hidden
       />
       <span
-        className="parchment-body text-sm flex-1 truncate"
-        style={{
-          fontWeight: isCurrent ? 600 : 400,
-          color: "var(--parchment-ink)",
-        }}
+        className="glass-body text-sm flex-1 truncate"
+        style={{ fontWeight: isCurrent ? 600 : 400 }}
         title={name}
       >
         {name}
@@ -256,28 +355,21 @@ const SortableRow = ({
         type="number"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={commitScore}
+        onBlur={commit}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            (e.target as HTMLInputElement).blur();
-          }
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
         }}
         aria-label={`Initiative score for ${name}`}
-        className="parchment-numeric w-12 px-1.5 py-0.5 text-sm text-right bg-[rgba(255,252,240,0.4)] border focus:outline-none focus:border-[var(--brass-shadow)]"
+        className="glass-numeric text-right text-sm focus:outline-none"
         style={{
-          borderColor: "rgba(110, 83, 32, 0.3)",
-          color: isCurrent ? "var(--brass-shadow)" : "var(--parchment-ink-muted)",
-          fontSize: "1rem",
+          width: 44,
+          padding: "2px 6px",
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid var(--glass-border)",
+          borderRadius: 4,
+          color: isCurrent ? "var(--glass-accent)" : "var(--glass-txt)",
         }}
       />
-      {isCurrent && (
-        <span
-          className="parchment-numeric shrink-0"
-          style={{ fontSize: "0.7rem", color: "var(--brass-shadow)" }}
-        >
-          ◆ NOW
-        </span>
-      )}
     </li>
   );
 };

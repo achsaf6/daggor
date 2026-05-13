@@ -11,6 +11,7 @@ import { useSocket } from "../../hooks/useSocket";
 import { useSurface } from "../../hooks/useSurface";
 import { useImageBounds } from "../../hooks/useImageBounds";
 import { useCoordinateMapper } from "../../hooks/useCoordinateMapper";
+import { useIdleDim } from "../../hooks/useIdleDim";
 import { MapImage } from "./MapImage";
 import { TokenManager } from "../Token/TokenManager";
 import { GridLines } from "./GridLines";
@@ -66,6 +67,11 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
   const isReady =
     Boolean(imageBounds) && !isBattlemapLoading && Boolean(currentBattlemap);
 
+  // Glass Atelier auto-dim: after 4s of no input, all .glass-panel children
+  // fade to ~40% opacity (CSS rule in globals.css keys off data-idle="true").
+  // Only enabled on the dashboard — display surface has no panels to dim.
+  const isIdle = useIdleDim(4000);
+
   useEffect(() => {
     onReadyChange?.(isReady);
   }, [isReady, onReadyChange]);
@@ -84,28 +90,6 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
 
   const images = useMemo(() => currentBattlemap?.images ?? [], [currentBattlemap?.images]);
   const activeImageId = currentBattlemap?.activeImageId ?? null;
-  const activeImageIndex = useMemo(() => {
-    if (!activeImageId) {
-      return images.length > 0 ? 0 : -1;
-    }
-    return images.findIndex((img) => img.id === activeImageId);
-  }, [activeImageId, images]);
-
-  const handlePrevFloor = useCallback(() => {
-    if (!canManageBattlemaps || images.length < 2) return;
-    const currentIndex = activeImageIndex >= 0 ? activeImageIndex : 0;
-    if (currentIndex > 0) {
-      void setActiveBattlemapImage(images[currentIndex - 1].id);
-    }
-  }, [activeImageIndex, canManageBattlemaps, images, setActiveBattlemapImage]);
-
-  const handleNextFloor = useCallback(() => {
-    if (!canManageBattlemaps || images.length < 2) return;
-    const currentIndex = activeImageIndex >= 0 ? activeImageIndex : 0;
-    if (currentIndex < images.length - 1) {
-      void setActiveBattlemapImage(images[currentIndex + 1].id);
-    }
-  }, [activeImageIndex, canManageBattlemaps, images, setActiveBattlemapImage]);
 
   const handleGridScaleChange = useCallback(
     (value: number) => {
@@ -375,13 +359,15 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
   return (
     <div
       ref={containerRef}
-      // Projector surface gets a subtle warm vignette darkening the edges so
-      // the table reads as "lit by the map". Dashboard keeps the full canvas
-      // for clarity. The pseudo-element sits above the map (z 7) but below
-      // tokens (z 10/20) and the toolbar (z 50).
+      // Projector surface gets a subtle vignette darkening the edges so the
+      // table reads as "lit by the map". Dashboard keeps the full canvas for
+      // clarity. The pseudo-element sits above the map (z 7) but below tokens
+      // (z 10/20) and the toolbar (z 50). When the dashboard is idle for >4s,
+      // `data-idle="true"` cascades into the glass panels and fades them.
       className={`fixed inset-0 m-0 p-0 overflow-hidden ${
-        showToolbar ? "" : "theatrical-vignette"
+        showToolbar ? "" : "glass-vignette"
       }`}
+      data-idle={showToolbar && isIdle ? "true" : "false"}
       style={{
         touchAction: "none",
         userSelect: "none",
@@ -420,15 +406,9 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
           onFogClear={() => void clearFog()}
           fogReady={fogShapes.length > 0}
           gridData={effectiveGridData}
-          floorCount={images.length}
-          floorIndex={activeImageIndex >= 0 ? activeImageIndex : 0}
-          floorLabel={
-            images.length > 0
-              ? images[activeImageIndex >= 0 ? activeImageIndex : 0]?.name ?? "Floor"
-              : null
-          }
-          onPrevFloor={handlePrevFloor}
-          onNextFloor={handleNextFloor}
+          floors={images}
+          activeFloorId={activeImageId}
+          onSelectFloor={(floorId) => void setActiveBattlemapImage(floorId)}
           floorControlsDisabled={!canManageBattlemaps || isBattlemapLoading}
         />
       )}

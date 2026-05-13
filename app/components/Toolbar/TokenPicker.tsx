@@ -9,6 +9,7 @@ import {
   TOKEN_SIZE_METADATA,
   TOKEN_SIZE_ORDER,
 } from "@/app/utils/tokenSizes";
+import { prefetchImage } from "@/app/utils/prefetchImage";
 
 interface TokenPickerProps {
   onTokenDragStart: (tokenTemplate: TokenTemplate) => void;
@@ -125,19 +126,11 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
 
       // Warm the browser cache so images are ready *before* the DM opens the
       // picker. Without this, each image fetch triggers on first paint of a
-      // tile (CSS background-image), and the swatches pop in slowly. We use
-      // `new Image()` so the request enters the HTTP cache without disturbing
-      // the DOM. Errors are intentionally swallowed — a missing token icon
-      // shouldn't break the picker.
-      const seen = new Set<string>();
-      next.forEach((tpl) => {
-        const url = tpl.imageUrl;
-        if (!url || seen.has(url)) return;
-        seen.add(url);
-        const img = new Image();
-        img.decoding = "async";
-        img.src = url;
-      });
+      // tile (CSS background-image), and the swatches pop in slowly.
+      // `prefetchImage` injects <link rel="preload" as="image"> into <head>,
+      // which is the most reliable way to populate the cache (the earlier
+      // `new Image()` approach was inconsistent across browsers).
+      next.forEach((tpl) => prefetchImage(tpl.imageUrl));
     };
 
     void fetchMonsters();
@@ -350,26 +343,43 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
           e.stopPropagation();
           setIsOpen((prev) => !prev);
         }}
-        className={`relative rounded-sm p-3 transition-colors ${
-          isOpen
-            ? "bg-[rgba(201,162,74,0.25)] text-[var(--brass-shadow)]"
-            : "text-[var(--brass-deep)] hover:text-[var(--brass-shadow)] hover:bg-[rgba(201,162,74,0.18)]"
-        }`}
+        // Match the rest of the SidebarToolbar: 36×36 grid-place-items-center
+        // with a 16px icon. Open state uses the same glass-highlight bg as
+        // Settings/Maps so the toolbar reads as a single coherent ribbon.
+        className="relative grid place-items-center transition-colors rounded-lg"
+        style={{
+          width: 36,
+          height: 36,
+          background: isOpen ? "var(--glass-highlight)" : "transparent",
+          color: isOpen ? "var(--glass-txt)" : "var(--glass-txt-muted)",
+        }}
+        onMouseEnter={(e) => {
+          if (!isOpen) {
+            e.currentTarget.style.background = "var(--glass-highlight)";
+            e.currentTarget.style.color = "var(--glass-txt)";
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isOpen) {
+            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.color = "var(--glass-txt-muted)";
+          }
+        }}
         aria-label="Add Token"
+        title="Tokens"
       >
-        <Circle className="h-6 w-6" strokeWidth={2} />
-        <div className="absolute bottom-1 right-1 w-0 h-0 border-l-[5px] border-l-transparent border-b-[5px] border-b-[var(--brass-deep)]" />
+        <Circle className="h-4 w-4" strokeWidth={1.75} />
       </button>
 
       {isOpen && (
-        <div className="parchment-panel absolute left-full ml-2 top-0 border border-[var(--brass-deep)] p-4 shadow-lg min-w-[240px] z-20">
+        <div className="glass-panel absolute left-full ml-2 top-0 border border-[var(--glass-accent)] p-4 shadow-lg min-w-[240px] z-20">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="parchment-heading text-sm">Token Catalog</h3>
+            <h3 className="glass-heading text-sm">Token Catalog</h3>
             {isLoadingTemplates && (
-              <span className="parchment-flavor text-xs" style={{ color: "var(--parchment-ink-muted)" }}>Loading…</span>
+              <span className="glass-muted text-xs" style={{ color: "var(--glass-txt-muted)" }}>Loading…</span>
             )}
           </div>
-          <div className="parchment-rule mb-3" />
+          <div className=" mb-3" />
           <div className="grid grid-cols-4 gap-2">
             {AVAILABLE_COLORS.map((color) => {
               const template = getTemplateForColor(color.value);
@@ -393,11 +403,11 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
                           backgroundImage: `url(${template.imageUrl})`,
                           backgroundSize: "cover",
                           backgroundPosition: "center",
-                          boxShadow: "0 0 0 1.5px var(--parchment-bright), 0 0 0 2.5px var(--brass-deep)",
+                          boxShadow: "0 0 0 1.5px var(--glass-bg-deep), 0 0 0 2.5px var(--glass-accent)",
                         }
                       : {
                           backgroundColor: color.value,
-                          boxShadow: "0 0 0 1.5px var(--parchment-bright), 0 0 0 2.5px var(--brass-deep)",
+                          boxShadow: "0 0 0 1.5px var(--glass-bg-deep), 0 0 0 2.5px var(--glass-accent)",
                         }
                   }
                   title={`Drag ${template.name ?? color.name} token (${sizeMeta.label})`}
@@ -405,12 +415,12 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
                   data-token-color={color.value}
                 >
                   <span
-                    className="parchment-numeric absolute bottom-0 right-0 mb-0.5 mr-0.5 border px-1"
+                    className="glass-numeric absolute bottom-0 right-0 mb-0.5 mr-0.5 border px-1"
                     style={{
                       fontSize: "0.55rem",
-                      color: "var(--parchment-ink)",
-                      borderColor: "var(--brass-deep)",
-                      background: "var(--parchment-bright)",
+                      color: "var(--glass-txt)",
+                      borderColor: "var(--glass-accent)",
+                      background: "var(--glass-bg-deep)",
                     }}
                   >
                     {TOKEN_SIZE_METADATA[template.size].label.charAt(0)}
@@ -424,20 +434,20 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
 
       {editorState && (
         <div
-          className="parchment-panel absolute left-full ml-3 top-0 z-30 w-72 border border-[var(--brass-deep)] p-4 text-sm shadow-2xl"
-          style={{ color: "var(--parchment-ink)" }}
+          className="glass-panel absolute left-full ml-3 top-0 z-30 w-72 border border-[var(--glass-accent)] p-4 text-sm shadow-2xl"
+          style={{ color: "var(--glass-txt)" }}
         >
           <div className="flex items-center justify-between mb-1">
             <div>
-              <p className="parchment-heading text-xs">Customize Token</p>
-              <p className="parchment-body text-base font-semibold mt-1" style={{ color: editorState.color }}>
+              <p className="glass-heading text-xs">Customize Token</p>
+              <p className="glass-body text-base font-semibold mt-1" style={{ color: editorState.color }}>
                 {AVAILABLE_COLORS.find((c) => c.value === editorState.color)?.name ?? editorState.color}
               </p>
             </div>
             <button
               type="button"
-              className="parchment-numeric transition-colors hover:text-[var(--brass-shadow)]"
-              style={{ color: "var(--brass-deep)" }}
+              className="glass-numeric transition-colors hover:text-[var(--glass-accent-deep)]"
+              style={{ color: "var(--glass-accent)" }}
               aria-label="Close editor"
               onClick={() => {
                 setEditorState(null);
@@ -449,9 +459,9 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
               ✕
             </button>
           </div>
-          <div className="parchment-rule mb-3" />
+          <div className=" mb-3" />
           <div className="flex flex-col gap-2 mb-3">
-            <label className="parchment-numeric text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
+            <label className="glass-numeric text-xs" style={{ color: "var(--glass-txt-muted)" }}>
               Token Name
             </label>
             <input
@@ -465,8 +475,8 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
                   void commitNameChange();
                 }
               }}
-              className="parchment-body w-full border px-2 py-1.5 text-sm focus:outline-none"
-              style={{ borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
+              className="glass-body w-full border px-2 py-1.5 text-sm focus:outline-none"
+              style={{ borderColor: "var(--glass-accent)", color: "var(--glass-txt)", background: "rgba(255,255,255,0.04)" }}
               placeholder={getDefaultTokenName(editorState.color)}
             />
           </div>
@@ -475,13 +485,13 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
               className="h-12 w-12 rounded-full"
               style={{
                 ...editorPreviewBackground,
-                boxShadow: "0 0 0 1.5px var(--parchment-bright), 0 0 0 2.5px var(--brass-deep)",
+                boxShadow: "0 0 0 1.5px var(--glass-bg-deep), 0 0 0 2.5px var(--glass-accent)",
               }}
             />
-            <div className="flex flex-col text-xs" style={{ color: "var(--parchment-ink-muted)" }}>
-              <span className="parchment-numeric" style={{ fontSize: "0.65rem" }}>DnD Size</span>
-              <span className="parchment-body font-semibold text-sm" style={{ color: "var(--parchment-ink)" }}>{TOKEN_SIZE_METADATA[editorState.size].label}</span>
-              <span className="parchment-flavor" style={{ fontSize: "0.7rem" }}>{TOKEN_SIZE_METADATA[editorState.size].description}</span>
+            <div className="flex flex-col text-xs" style={{ color: "var(--glass-txt-muted)" }}>
+              <span className="glass-numeric" style={{ fontSize: "0.65rem" }}>DnD Size</span>
+              <span className="glass-body font-semibold text-sm" style={{ color: "var(--glass-txt)" }}>{TOKEN_SIZE_METADATA[editorState.size].label}</span>
+              <span className="glass-muted" style={{ fontSize: "0.7rem" }}>{TOKEN_SIZE_METADATA[editorState.size].description}</span>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-1.5 mb-3">
@@ -492,11 +502,11 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
                 <button
                   key={size}
                   type="button"
-                  className="parchment-numeric border px-2 py-1 text-xs transition-colors"
+                  className="glass-numeric border px-2 py-1 text-xs transition-colors"
                   style={{
-                    color: isSelected ? "var(--parchment-bright)" : "var(--brass-shadow)",
-                    borderColor: isSelected ? "var(--brass-shadow)" : "var(--brass-deep)",
-                    background: isSelected ? "var(--brass-deep)" : "rgba(255, 252, 240, 0.4)",
+                    color: isSelected ? "var(--glass-bg-deep)" : "var(--glass-accent-deep)",
+                    borderColor: isSelected ? "var(--glass-accent-deep)" : "var(--glass-accent)",
+                    background: isSelected ? "var(--glass-accent)" : "rgba(255,255,255,0.04)",
                   }}
                   onClick={() => void handleSizeChange(size)}
                   disabled={isSaving && isSelected}
@@ -507,7 +517,7 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
             })}
           </div>
           <div className="mb-2">
-            <p className="parchment-numeric text-xs mb-1.5" style={{ color: "var(--parchment-ink-muted)" }}>Token Art</p>
+            <p className="glass-numeric text-xs mb-1.5" style={{ color: "var(--glass-txt-muted)" }}>Token Art</p>
             <input
               ref={fileInputRef}
               type="file"
@@ -518,8 +528,8 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
             <div className="flex gap-2">
               <button
                 type="button"
-                className="parchment-numeric flex-1 border px-2 py-1 text-xs transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-60"
-                style={{ color: "var(--parchment-bright)", borderColor: "var(--brass-shadow)", background: "var(--brass-deep)" }}
+                className="glass-numeric flex-1 border px-2 py-1 text-xs transition-colors hover:bg-[var(--glass-highlight)] disabled:opacity-60"
+                style={{ color: "var(--glass-bg-deep)", borderColor: "var(--glass-accent-deep)", background: "var(--glass-accent)" }}
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
               >
@@ -527,8 +537,8 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
               </button>
               <button
                 type="button"
-                className="parchment-numeric border px-2 py-1 text-xs transition-colors hover:bg-[rgba(201,162,74,0.15)] disabled:opacity-50"
-                style={{ color: "var(--brass-deep)", borderColor: "var(--brass-deep)", background: "transparent" }}
+                className="glass-numeric border px-2 py-1 text-xs transition-colors hover:bg-[var(--glass-highlight)] disabled:opacity-50"
+                style={{ color: "var(--glass-accent)", borderColor: "var(--glass-accent)", background: "transparent" }}
                 onClick={() => void handleImageRemove()}
                 disabled={!editorState.imageUrl || isSaving || isUploading}
               >
@@ -536,11 +546,11 @@ export const TokenPicker = ({ onTokenDragStart, onTokenDragEnd }: TokenPickerPro
               </button>
             </div>
             {editorState.imageUrl && (
-              <p className="parchment-flavor mt-1 break-all" style={{ fontSize: "0.7rem", color: "var(--parchment-ink-muted)" }}>{editorState.imageUrl}</p>
+              <p className="glass-muted mt-1 break-all" style={{ fontSize: "0.7rem", color: "var(--glass-txt-muted)" }}>{editorState.imageUrl}</p>
             )}
           </div>
-          {editorStatus && <p className="parchment-flavor" style={{ fontSize: "0.7rem", color: "#3a6a3a" }}>{editorStatus}</p>}
-          {editorError && <p className="parchment-flavor" style={{ fontSize: "0.7rem", color: "#7a2424" }}>{editorError}</p>}
+          {editorStatus && <p className="glass-muted" style={{ fontSize: "0.7rem", color: "#3a6a3a" }}>{editorStatus}</p>}
+          {editorError && <p className="glass-muted" style={{ fontSize: "0.7rem", color: "#7a2424" }}>{editorError}</p>}
         </div>
       )}
     </div>

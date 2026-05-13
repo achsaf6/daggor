@@ -188,7 +188,7 @@ export const GridOffsetJoystick = ({
 
   return (
     <div>
-      <label className="parchment-numeric block text-xs mb-2" style={{ color: "var(--parchment-ink-muted)" }}>
+      <label className="glass-numeric block text-xs mb-2" style={{ color: "var(--glass-txt-muted)" }}>
         Grid Offset
       </label>
       <div
@@ -198,10 +198,10 @@ export const GridOffsetJoystick = ({
           width: `${joystickSize}px`,
           height: `${joystickSize}px`,
           margin: "0 auto",
-          borderColor: "var(--brass-deep)",
+          borderColor: "var(--glass-accent)",
           borderStyle: "solid",
           borderWidth: 1,
-          background: "rgba(255, 252, 240, 0.4)",
+          background: "rgba(255,255,255,0.04)",
         }}
         tabIndex={0}
         onClick={handleClick}
@@ -210,8 +210,8 @@ export const GridOffsetJoystick = ({
         onMouseLeave={handleMouseUp}
         onKeyDown={handleKeyDown}
       >
-        <div className="absolute inset-y-0 left-1/2 -translate-x-px w-px" style={{ background: "rgba(110, 83, 32, 0.3)" }} aria-hidden />
-        <div className="absolute inset-x-0 top-1/2 -translate-y-px h-px" style={{ background: "rgba(110, 83, 32, 0.3)" }} aria-hidden />
+        <div className="absolute inset-y-0 left-1/2 -translate-x-px w-px" style={{ background: "var(--glass-border)" }} aria-hidden />
+        <div className="absolute inset-x-0 top-1/2 -translate-y-px h-px" style={{ background: "var(--glass-border)" }} aria-hidden />
 
         <div
           className="absolute rounded-full shadow-lg"
@@ -223,8 +223,8 @@ export const GridOffsetJoystick = ({
             transform: "translate(-50%, -50%)",
             cursor: isDragging ? "grabbing" : "grab",
             transition: isDragging ? "none" : "all 0.1s ease-out",
-            backgroundColor: "var(--brass-deep)",
-            boxShadow: "0 0 0 2px var(--parchment-bright), 0 0 0 3px var(--brass-shadow)",
+            backgroundColor: "var(--glass-accent)",
+            boxShadow: "0 0 0 2px var(--glass-bg-deep), 0 0 0 3px var(--glass-accent-deep)",
           }}
         />
 
@@ -236,11 +236,11 @@ export const GridOffsetJoystick = ({
             left: "50%",
             top: "50%",
             transform: "translate(-50%, -50%)",
-            backgroundColor: "var(--brass-shadow)",
+            backgroundColor: "var(--glass-accent-deep)",
           }}
         />
       </div>
-      <div className="parchment-numeric flex justify-between mt-2" style={{ fontSize: "0.75rem", color: "var(--parchment-ink-muted)" }}>
+      <div className="glass-numeric flex justify-between mt-2" style={{ fontSize: "0.75rem", color: "var(--glass-txt-muted)" }}>
         {editingField === "x" ? (
           <span className="flex items-center gap-1">
             X:{" "}
@@ -251,15 +251,15 @@ export const GridOffsetJoystick = ({
               onChange={handleInputChange}
               onBlur={handleInputSubmit}
               onKeyDown={handleInputKeyDown}
-              className="parchment-numeric w-10 px-1 border focus:outline-none"
-              style={{ fontSize: "inherit", borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
+              className="glass-numeric w-10 px-1 border focus:outline-none"
+              style={{ fontSize: "inherit", borderColor: "var(--glass-accent)", color: "var(--glass-txt)", background: "rgba(255,255,255,0.04)" }}
             />
             px
           </span>
         ) : (
           <span
             onDoubleClick={() => handleDoubleClick("x")}
-            className="cursor-pointer transition-colors hover:text-[var(--brass-shadow)]"
+            className="cursor-pointer transition-colors hover:text-[var(--glass-accent-deep)]"
           >
             X: {offsetX.toFixed(0)}px
           </span>
@@ -274,15 +274,15 @@ export const GridOffsetJoystick = ({
               onChange={handleInputChange}
               onBlur={handleInputSubmit}
               onKeyDown={handleInputKeyDown}
-              className="parchment-numeric w-10 px-1 border focus:outline-none"
-              style={{ fontSize: "inherit", borderColor: "var(--brass-deep)", color: "var(--parchment-ink)", background: "rgba(255, 252, 240, 0.6)" }}
+              className="glass-numeric w-10 px-1 border focus:outline-none"
+              style={{ fontSize: "inherit", borderColor: "var(--glass-accent)", color: "var(--glass-txt)", background: "rgba(255,255,255,0.04)" }}
             />
             px
           </span>
         ) : (
           <span
             onDoubleClick={() => handleDoubleClick("y")}
-            className="cursor-pointer transition-colors hover:text-[var(--brass-shadow)]"
+            className="cursor-pointer transition-colors hover:text-[var(--glass-accent-deep)]"
           >
             Y: {offsetY.toFixed(0)}px
           </span>

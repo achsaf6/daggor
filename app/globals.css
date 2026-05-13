@@ -122,6 +122,23 @@
     radial-gradient(ellipse at center,
       transparent 55%,
       oklch(0.05 0.01 60 / 0.55) 100%);
+
+  /* Glass Atelier — translucent dashboard skin. Map shows through; panels
+     are dark glass with a faint specular highlight at the top edge. */
+  --glass-bg:           rgba(20, 18, 16, 0.55);
+  --glass-bg-deep:      rgba(20, 18, 16, 0.78);
+  --glass-border:       rgba(255, 255, 255, 0.08);
+  --glass-border-bright: rgba(255, 255, 255, 0.16);
+  --glass-highlight:    rgba(255, 255, 255, 0.12);
+  --glass-accent:       oklch(0.72 0.13 220);
+  --glass-accent-soft:  oklch(0.72 0.13 220 / 0.22);
+  --glass-accent-deep:  oklch(0.62 0.15 220);
+  --glass-txt:          oklch(0.95 0 0);
+  --glass-txt-muted:    oklch(0.62 0 0);
+  --glass-txt-faint:    oklch(0.45 0 0);
+  --glass-radius:       14px;
+  --glass-radius-sm:    8px;
+  --glass-shadow:       0 12px 36px -12px rgba(0, 0, 0, 0.55);
 }
 
 /* Mirror for shadcn's `.dark` variant. */
@@ -313,6 +330,122 @@
   inset: 0;
   pointer-events: none;
   background: var(--theatrical-vignette);
+  z-index: 7;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Glass Atelier — dashboard skin (active design)
+   ──────────────────────────────────────────────────────────────────── */
+
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius);
+  color: var(--glass-txt);
+  /* Deliberately NOT setting `position` here — every consumer applies
+     `fixed` or `absolute` themselves. Setting `position: relative` would
+     clobber Tailwind's `fixed`, drop the element back into normal flow,
+     and stretch it to full viewport width. (Same trap as the
+     theatrical-vignette CSS bug we already fixed.)
+     Also deliberately NOT setting `overflow: hidden` — flyouts and
+     tooltips render as `position: absolute` children that intentionally
+     spill outside the panel (e.g. SidebarToolbar's BattlemapManager flyout
+     uses `left-full ml-2`). Consumers that DO need clipping (lists with
+     scroll, the Soundboard manager) opt in via `overflow-hidden`. */
+  box-shadow: var(--glass-shadow);
+  transition: opacity 200ms ease;
+}
+/* Specular highlight at top edge — sells the "glass" read */
+.glass-panel::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--glass-highlight) 50%, transparent);
+  pointer-events: none;
+}
+
+/* Auto-dim: when MapViewDisplay's container has data-idle="true", every
+   glass panel that isn't being hovered fades back so the map dominates. */
+[data-idle="true"] .glass-panel:not(:hover) {
+  opacity: 0.42;
+  transition: opacity 600ms ease;
+}
+
+/* Typography helpers — drop-in replacements for the parchment-* family.
+   Use the project's existing Geist Sans variable; fall back to Inter / system. */
+.glass-heading {
+  font-family: var(--font-geist-sans), Inter, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--glass-txt-muted);
+}
+.glass-body {
+  font-family: var(--font-geist-sans), Inter, system-ui, sans-serif;
+  color: var(--glass-txt);
+}
+.glass-numeric {
+  font-family: var(--font-geist-sans), Inter, system-ui, sans-serif;
+  font-feature-settings: 'tnum';
+  color: var(--glass-txt-muted);
+  font-weight: 500;
+}
+.glass-muted {
+  font-family: var(--font-geist-sans), Inter, system-ui, sans-serif;
+  color: var(--glass-txt-faint);
+  font-size: 12px;
+}
+
+/* Glass control surface — buttons, hover targets inside panels */
+.glass-btn {
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--glass-txt);
+  font-family: var(--font-geist-sans), Inter, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 6px 12px;
+  border-radius: var(--glass-radius-sm);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.glass-btn:hover:not(:disabled) {
+  background: var(--glass-highlight);
+  border-color: var(--glass-border-bright);
+}
+.glass-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.glass-btn-primary {
+  background: var(--glass-accent-soft);
+  border-color: var(--glass-accent);
+  color: var(--glass-txt);
+}
+.glass-btn-primary:hover:not(:disabled) {
+  background: var(--glass-accent);
+  border-color: var(--glass-accent);
+}
+.glass-btn-icon {
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+}
+
+/* Vignette for the display surface using glass tokens */
+.glass-vignette::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.35) 100%);
   z-index: 7;
 }
 

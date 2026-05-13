@@ -237,6 +237,15 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
             }
             return updated;
           });
+          // Disconnected (faded) tokens are keyed by persistentUserId; the DM
+          // may have dragged one and we need to mirror the move locally.
+          setDisconnectedUsers((prev) => {
+            const user = prev.get(data.userId);
+            if (!user) return prev;
+            const updated = new Map(prev);
+            updated.set(data.userId, { ...user, position: data.position });
+            return updated;
+          });
         } else {
           // Update our own position if someone else moved our token
           setMyPosition(data.position);
@@ -522,6 +531,14 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
             position,
           });
         }
+        return updated;
+      });
+      // DM may also be dragging a disconnected (faded) token, keyed by persistentUserId.
+      setDisconnectedUsers((prev) => {
+        const user = prev.get(tokenId);
+        if (!user) return prev;
+        const updated = new Map(prev);
+        updated.set(tokenId, { ...user, position });
         return updated;
       });
     }

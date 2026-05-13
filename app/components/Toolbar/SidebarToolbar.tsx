@@ -1,30 +1,46 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ChevronLeft, ChevronRight, Cloud, CloudOff, Layers, Settings as SettingsIcon, Users } from "lucide-react";
+import {
+  Building2,
+  Check,
+  Cloud,
+  CloudOff,
+  Layers,
+  Settings as SettingsIcon,
+  Users,
+} from "lucide-react";
 import { MapSettings } from "./Settings/MapSettings";
 import { TokenPicker } from "./TokenPicker";
 import { BattlemapManager } from "./BattlemapManager";
 import { GridData } from "../../utils/gridData";
 import { TokenTemplate } from "../../types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { useClampedFlyoutPlacement } from "../../hooks/useClampedFlyoutPlacement";
 
-// Three semantic active-state colors so the GM can tell at a glance which
-// tool is on. Cover = primary (general structures), spawn = success (player
-// spawn), fog = warning (concealment). Matches the in-canvas preview colors.
-// Belle Époque vocabulary: tool icons sit directly on the cream parchment.
-// Idle icons render as warm-ink brass; active tools fill with the same brass
-// gradient as the panel frames so the active state reads as "engraved
-// emphasis" rather than a UI button color shift.
-const TOOL_ACTIVE_BG: Record<"spawn" | "fog", string> = {
-  spawn:
-    "bg-[var(--brass-deep)] text-[var(--parchment-bright)] hover:bg-[var(--brass-shadow)]",
-  fog:
-    "bg-[var(--brass-deep)] text-[var(--parchment-bright)] hover:bg-[var(--brass-shadow)]",
+// Glass Atelier vertical icon ribbon. Slim 44px-wide glass strip on the left
+// edge; tools are 36px icon buttons. Active tools pick up the cool-blue
+// accent. Flyouts (Settings, Battlemap Manager, Token Picker) slide out to
+// the right and are themselves glass panels.
+const TOOL_BASE =
+  "relative grid place-items-center transition-colors rounded-lg";
+const TOOL_SIZE = { width: 36, height: 36 } as const;
+const TOOL_INACTIVE_STYLE: React.CSSProperties = {
+  color: "var(--glass-txt-muted)",
 };
-const TOOL_BASE = "rounded-sm p-3 transition-colors";
-const TOOL_INACTIVE =
-  "text-[var(--brass-deep)] hover:text-[var(--brass-shadow)] hover:bg-[rgba(201,162,74,0.18)]";
+const TOOL_ACTIVE_STYLE: React.CSSProperties = {
+  background: "var(--glass-accent-soft)",
+  color: "var(--glass-accent)",
+};
+const TOOL_OPEN_STYLE: React.CSSProperties = {
+  background: "var(--glass-highlight)",
+  color: "var(--glass-txt)",
+};
+
+interface FloorSummary {
+  id: string;
+  name: string | null;
+}
 
 interface SidebarToolbarProps {
   gridScale: number;
@@ -41,11 +57,12 @@ interface SidebarToolbarProps {
   onFogClear: () => void;
   fogReady: boolean;
   gridData: GridData;
-  floorCount?: number;
-  floorIndex?: number;
-  floorLabel?: string | null;
-  onPrevFloor?: () => void;
-  onNextFloor?: () => void;
+  // Floor picker is hidden entirely when there's only one floor (or none).
+  // The button shows only on multi-floor maps; click opens a glass flyout
+  // listing all floors with the active one checked.
+  floors?: FloorSummary[];
+  activeFloorId?: string | null;
+  onSelectFloor?: (floorId: string) => void;
   floorControlsDisabled?: boolean;
 }
 
@@ -64,72 +81,108 @@ export const SidebarToolbar = ({
   onFogClear,
   fogReady,
   gridData,
-  floorCount = 0,
-  floorIndex = 0,
-  floorLabel = null,
-  onPrevFloor,
-  onNextFloor,
+  floors = [],
+  activeFloorId = null,
+  onSelectFloor,
   floorControlsDisabled = false,
 }: SidebarToolbarProps) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMapManagerOpen, setIsMapManagerOpen] = useState(false);
+  const [isFloorPickerOpen, setIsFloorPickerOpen] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
 
-  // Close settings when clicking outside
+  // Trigger refs feed into useClampedFlyoutPlacement so each flyout positions
+  // itself near its button but never spills past the viewport bottom.
+  const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  const mapsBtnRef = useRef<HTMLButtonElement>(null);
+  const floorsBtnRef = useRef<HTMLButtonElement>(null);
+
+  // minHeight reflects how much vertical room each flyout's content
+  // *prefers* — when the trigger is too low, the flyout shifts up just
+  // enough to give itself this much room (capped by viewport - margins).
+  const settingsPlacement = useClampedFlyoutPlacement(settingsBtnRef, isSettingsOpen, { minHeight: 360 });
+  const mapsPlacement = useClampedFlyoutPlacement(mapsBtnRef, isMapManagerOpen, { minHeight: 480 });
+  const floorsPlacement = useClampedFlyoutPlacement(floorsBtnRef, isFloorPickerOpen, { minHeight: 120 });
+
+  // Multi-floor only: there's no point in a picker for a single-floor map.
+  const hasMultipleFloors = floors.length > 1;
+  const activeFloorIndex = hasMultipleFloors
+    ? Math.max(0, floors.findIndex((f) => f.id === activeFloorId))
+    : 0;
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (toolbarRef.current && !toolbarRef.current.contains(event.target as Node)) {
         setIsSettingsOpen(false);
         setIsMapManagerOpen(false);
+        setIsFloorPickerOpen(false);
       }
     };
-
-    if (isSettingsOpen || isMapManagerOpen) {
+    if (isSettingsOpen || isMapManagerOpen || isFloorPickerOpen) {
       document.addEventListener("mousedown", handleClickOutside);
     }
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [isSettingsOpen, isMapManagerOpen]);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isSettingsOpen, isMapManagerOpen, isFloorPickerOpen]);
 
   return (
+    // Outer wrapper handles vertical centering via flexbox so the toolbar
+    // itself has no `transform`. Fixed-position flyouts inside the toolbar
+    // would otherwise be positioned relative to a transformed ancestor (CSS
+    // makes any element with `transform`/`perspective`/`filter` the
+    // containing block for `position: fixed` children), breaking
+    // `useClampedFlyoutPlacement`'s viewport math by a few hundred pixels.
+    <div
+      className="fixed left-4 top-0 bottom-0 z-50 flex items-center pointer-events-none"
+    >
     <div
       ref={toolbarRef}
-      className="parchment-panel fixed left-4 top-1/4 -translate-y-1/2 z-50 shadow-lg flex flex-col p-1 gap-1 border border-[var(--brass-deep)]"
+      className="glass-panel flex flex-col gap-1 p-1.5 pointer-events-auto"
     >
       {/* Settings */}
       <div className="relative">
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              ref={settingsBtnRef}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setIsSettingsOpen(!isSettingsOpen);
+                setIsSettingsOpen((v) => !v);
+                if (!isSettingsOpen) {
+                  setIsMapManagerOpen(false);
+                  setIsFloorPickerOpen(false);
+                }
               }}
-              className={`relative ${TOOL_BASE} ${
-                isSettingsOpen ? "bg-[rgba(201,162,74,0.25)] text-[var(--brass-shadow)]" : TOOL_INACTIVE
-              }`}
+              className={TOOL_BASE}
+              style={{ ...TOOL_SIZE, ...(isSettingsOpen ? TOOL_OPEN_STYLE : TOOL_INACTIVE_STYLE) }}
               aria-label="Settings"
             >
-              <SettingsIcon className="h-6 w-6" strokeWidth={2} />
-              <div className="absolute bottom-1 right-1 w-0 h-0 border-l-[5px] border-l-transparent border-b-[5px] border-b-[var(--brass-deep)]" />
+              <SettingsIcon className="h-4 w-4" strokeWidth={1.75} />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">Settings</TooltipContent>
         </Tooltip>
 
-        {isSettingsOpen && (
-          <div className="parchment-panel absolute left-full ml-2 top-0 border border-[var(--brass-deep)] p-4 shadow-lg min-w-[280px]">
-            <MapSettings
-              gridScale={gridScale}
-              onGridScaleChange={onGridScaleChange}
-              gridOffsetX={gridOffsetX}
-              gridOffsetY={gridOffsetY}
-              onGridOffsetChange={onGridOffsetChange}
-              gridData={gridData}
-            />
+        {isSettingsOpen && settingsPlacement && (
+          <div
+            className="glass-panel fixed flex flex-col"
+            style={{
+              left: settingsPlacement.left,
+              top: settingsPlacement.top,
+              maxHeight: settingsPlacement.maxHeight,
+              minWidth: 300,
+            }}
+          >
+            <div className="overflow-y-auto p-4">
+              <MapSettings
+                gridScale={gridScale}
+                onGridScaleChange={onGridScaleChange}
+                gridOffsetX={gridOffsetX}
+                gridOffsetY={gridOffsetY}
+                onGridOffsetChange={onGridOffsetChange}
+                gridData={gridData}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -139,74 +192,173 @@ export const SidebarToolbar = ({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              ref={mapsBtnRef}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setIsMapManagerOpen(!isMapManagerOpen);
-                if (!isMapManagerOpen) setIsSettingsOpen(false);
+                setIsMapManagerOpen((v) => !v);
+                if (!isMapManagerOpen) {
+                  setIsSettingsOpen(false);
+                  setIsFloorPickerOpen(false);
+                }
               }}
-              className={`relative ${TOOL_BASE} ${
-                isMapManagerOpen ? "bg-[rgba(201,162,74,0.25)] text-[var(--brass-shadow)]" : TOOL_INACTIVE
-              }`}
+              className={TOOL_BASE}
+              style={{
+                ...TOOL_SIZE,
+                ...(isMapManagerOpen ? TOOL_OPEN_STYLE : TOOL_INACTIVE_STYLE),
+              }}
               aria-label="Battlemap Manager"
             >
-              <Layers className="h-6 w-6" strokeWidth={2} />
-              <div className="absolute bottom-1 right-1 w-0 h-0 border-l-[5px] border-l-transparent border-b-[5px] border-b-[var(--brass-deep)]" />
+              <Layers className="h-4 w-4" strokeWidth={1.75} />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">Maps</TooltipContent>
         </Tooltip>
 
-        {isMapManagerOpen && (
-          <div className="parchment-panel absolute left-full ml-2 top-0 border border-[var(--brass-deep)] p-4 shadow-lg w-[400px] max-h-[70vh] overflow-hidden flex flex-col">
-            <BattlemapManager onClose={() => setIsMapManagerOpen(false)} />
+        {isMapManagerOpen && mapsPlacement && (
+          <div
+            className="glass-panel fixed flex flex-col"
+            style={{
+              left: mapsPlacement.left,
+              top: mapsPlacement.top,
+              maxHeight: mapsPlacement.maxHeight,
+              width: 420,
+            }}
+          >
+            <div className="overflow-y-auto p-4">
+              <BattlemapManager onClose={() => setIsMapManagerOpen(false)} />
+            </div>
           </div>
         )}
       </div>
 
-      {/* Floor controls */}
-      {floorCount > 1 && typeof onPrevFloor === "function" && typeof onNextFloor === "function" && (
-        <div className="flex flex-col gap-1">
-          <div className="flex gap-1">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onPrevFloor();
+      {/* Floor picker — single button with a numeric badge showing the
+          active floor. Click opens a glass flyout listing all floors. Only
+          rendered when the current battlemap actually has multiple floors. */}
+      {hasMultipleFloors && (
+        <div className="relative">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                ref={floorsBtnRef}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsFloorPickerOpen((v) => !v);
+                  if (!isFloorPickerOpen) {
+                    setIsSettingsOpen(false);
+                    setIsMapManagerOpen(false);
+                  }
+                }}
+                disabled={floorControlsDisabled}
+                className={TOOL_BASE}
+                style={{
+                  ...TOOL_SIZE,
+                  ...(isFloorPickerOpen ? TOOL_OPEN_STYLE : TOOL_INACTIVE_STYLE),
+                  opacity: floorControlsDisabled ? 0.4 : 1,
+                }}
+                aria-label="Floors"
+              >
+                <Building2 className="h-4 w-4" strokeWidth={1.75} />
+                <span
+                  aria-hidden
+                  className="absolute"
+                  style={{
+                    top: 3,
+                    right: 3,
+                    minWidth: 14,
+                    height: 14,
+                    padding: "0 3px",
+                    borderRadius: 7,
+                    background: "var(--glass-accent)",
+                    color: "#0e0e10",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    display: "grid",
+                    placeItems: "center",
+                    lineHeight: 1,
+                  }}
+                >
+                  {activeFloorIndex + 1}
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Floors</TooltipContent>
+          </Tooltip>
+
+          {isFloorPickerOpen && floorsPlacement && (
+            <div
+              className="glass-panel fixed flex flex-col"
+              style={{
+                left: floorsPlacement.left,
+                top: floorsPlacement.top,
+                maxHeight: floorsPlacement.maxHeight,
+                minWidth: 200,
               }}
-              disabled={floorControlsDisabled}
-              className="flex-1 rounded-sm px-2 py-2 text-[var(--brass-deep)] hover:text-[var(--brass-shadow)] hover:bg-[rgba(201,162,74,0.18)] transition-colors disabled:opacity-50 flex items-center justify-center"
-              aria-label="Previous floor"
-              title="Previous floor"
             >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onNextFloor();
-              }}
-              disabled={floorControlsDisabled}
-              className="flex-1 rounded-sm px-2 py-2 text-[var(--brass-deep)] hover:text-[var(--brass-shadow)] hover:bg-[rgba(201,162,74,0.18)] transition-colors disabled:opacity-50 flex items-center justify-center"
-              aria-label="Next floor"
-              title="Next floor"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="parchment-numeric text-center px-1" style={{ fontSize: "0.65rem", color: "var(--brass-deep)" }}>
-            {floorLabel ? floorLabel : `Floor ${floorIndex + 1}`} ({floorIndex + 1}/{floorCount})
-          </div>
+              <ul className="flex flex-col overflow-y-auto p-1.5">
+                {floors.map((floor, idx) => {
+                  const isActive = floor.id === activeFloorId;
+                  const label = floor.name?.trim() || `Floor ${idx + 1}`;
+                  return (
+                    <li key={floor.id}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!isActive) onSelectFloor?.(floor.id);
+                          setIsFloorPickerOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors"
+                        style={{
+                          background: isActive ? "var(--glass-accent-soft)" : "transparent",
+                          color: isActive ? "var(--glass-accent)" : "var(--glass-txt)",
+                          fontWeight: isActive ? 500 : 400,
+                          textAlign: "left",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isActive) e.currentTarget.style.background = "var(--glass-highlight)";
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isActive) e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        <span
+                          className="grid place-items-center"
+                          style={{ width: 14, height: 14 }}
+                        >
+                          {isActive && <Check className="h-3 w-3" strokeWidth={2.5} />}
+                        </span>
+                        <span className="flex-1 truncate">{label}</span>
+                        <span
+                          className="glass-numeric"
+                          style={{ fontSize: 10, color: "var(--glass-txt-faint)" }}
+                        >
+                          {idx + 1}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Separator before tool group */}
+      <div
+        aria-hidden
+        className="my-1 mx-auto"
+        style={{ width: 24, height: 1, background: "var(--glass-border)" }}
+      />
 
       {/* Token picker */}
       <div className="relative">
         <TokenPicker onTokenDragStart={onTokenDragStart} onTokenDragEnd={onTokenDragEnd} />
       </div>
 
-      {/* Spawn area — single-shot drag. */}
+      {/* Spawn area */}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -215,19 +367,21 @@ export const SidebarToolbar = ({
               e.stopPropagation();
               onSpawnToolToggle();
             }}
-            className={`${TOOL_BASE} ${
-              isSpawnToolActive ? TOOL_ACTIVE_BG.spawn : TOOL_INACTIVE
-            }`}
+            className={TOOL_BASE}
+            style={{
+              ...TOOL_SIZE,
+              ...(isSpawnToolActive ? TOOL_ACTIVE_STYLE : TOOL_INACTIVE_STYLE),
+            }}
             aria-label="Spawn area tool"
             aria-pressed={isSpawnToolActive}
           >
-            <Users className="h-6 w-6" strokeWidth={2} />
+            <Users className="h-4 w-4" strokeWidth={1.75} />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">Spawn area — drag a rectangle</TooltipContent>
       </Tooltip>
 
-      {/* Fog — drag to reveal; right-click to clear. */}
+      {/* Fog */}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -241,16 +395,18 @@ export const SidebarToolbar = ({
               e.stopPropagation();
               if (fogReady) onFogClear();
             }}
-            className={`${TOOL_BASE} ${
-              isFogToolActive ? TOOL_ACTIVE_BG.fog : TOOL_INACTIVE
-            }`}
+            className={TOOL_BASE}
+            style={{
+              ...TOOL_SIZE,
+              ...(isFogToolActive ? TOOL_ACTIVE_STYLE : TOOL_INACTIVE_STYLE),
+            }}
             aria-label="Fog of war"
             aria-pressed={isFogToolActive}
           >
             {isFogToolActive ? (
-              <Cloud className="h-6 w-6" strokeWidth={2} />
+              <Cloud className="h-4 w-4" strokeWidth={1.75} />
             ) : (
-              <CloudOff className="h-6 w-6" strokeWidth={2} />
+              <CloudOff className="h-4 w-4" strokeWidth={1.75} />
             )}
           </button>
         </TooltipTrigger>
@@ -259,6 +415,6 @@ export const SidebarToolbar = ({
         </TooltipContent>
       </Tooltip>
     </div>
+    </div>
   );
 };
-

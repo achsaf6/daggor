@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Wand2 } from "lucide-react";
 import { GridSizeSlider } from "./GridSizeSlider";
 import { GridOffsetJoystick } from "./GridOffsetJoystick";
 import { HorizontalSquaresInput } from "./SquaresInput";
@@ -29,9 +30,31 @@ export const MapSettings = ({
     isMutating,
     isBattlemapLoading,
     deleteBattlemap,
+    detectAndApplyGrid,
   } = useBattlemap();
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [detectionMessage, setDetectionMessage] = useState<string | null>(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+
+  const handleDetectGrid = async () => {
+    setIsDetecting(true);
+    setDetectionMessage(null);
+    const result = await detectAndApplyGrid();
+    if (result.ok) {
+      setDetectionMessage(
+        `Detected grid: ${result.spacing.x}×${result.spacing.y}px`
+      );
+    } else if (result.reason === "no-image") {
+      setDetectionMessage("No active map image to scan");
+    } else if (result.reason === "low-confidence") {
+      setDetectionMessage("Couldn't detect a grid");
+    } else {
+      setDetectionMessage("Detection failed");
+    }
+    setIsDetecting(false);
+    setTimeout(() => setDetectionMessage(null), 3500);
+  };
 
   const handleDeleteBattlemap = async () => {
     if (!currentBattlemap) {
@@ -54,8 +77,29 @@ export const MapSettings = ({
 
   return (
     <div onClick={(e) => e.stopPropagation()}>
-      <h3 className="parchment-heading text-sm mb-1">Settings</h3>
-      <div className="parchment-rule mb-4" />
+      <h3 className="glass-heading text-sm mb-1">Settings</h3>
+      <div className=" mb-4" />
+
+      <div className="mb-4">
+        <button
+          type="button"
+          onClick={handleDetectGrid}
+          disabled={disabled || isDetecting}
+          className="glass-body w-full px-3 py-2 text-sm border flex items-center justify-center gap-2 transition-colors disabled:opacity-50 hover:bg-[var(--glass-highlight)]"
+          style={{
+            borderColor: "var(--glass-border)",
+            background: "var(--glass-accent-soft, rgba(255,255,255,0.04))",
+          }}
+        >
+          <Wand2 className="h-4 w-4" />
+          {isDetecting ? "Detecting…" : "Detect grid"}
+        </button>
+        {detectionMessage ? (
+          <div className="glass-muted text-xs mt-2" style={{ color: "var(--glass-txt-muted)" }}>
+            {detectionMessage}
+          </div>
+        ) : null}
+      </div>
 
       <div className="mb-4">
         <GridSizeSlider value={gridScale} onChange={onGridScaleChange} />
@@ -76,12 +120,12 @@ export const MapSettings = ({
       </div>
 
       {currentBattlemap ? (
-        <div className="mb-1 pt-4" style={{ borderTop: "1px solid rgba(110, 83, 32, 0.3)" }}>
+        <div className="mb-1 pt-4" style={{ borderTop: "1px solid var(--glass-border)" }}>
           <button
             type="button"
             onClick={handleDeleteBattlemap}
             disabled={disabled}
-            className="parchment-numeric w-full px-3 py-2 text-sm border transition-colors disabled:opacity-50 hover:bg-[rgba(166,49,49,0.18)]"
+            className="glass-numeric w-full px-3 py-2 text-sm border transition-colors disabled:opacity-50 hover:bg-[rgba(166,49,49,0.18)]"
             style={{
               color: "#7a2424",
               borderColor: "#7a2424",
@@ -91,7 +135,7 @@ export const MapSettings = ({
             DELETE BATTLEMAP
           </button>
           {statusMessage ? (
-            <div className="parchment-flavor text-xs mt-2" style={{ color: "var(--parchment-ink-muted)" }}>{statusMessage}</div>
+            <div className="glass-muted text-xs mt-2" style={{ color: "var(--glass-txt-muted)" }}>{statusMessage}</div>
           ) : null}
         </div>
       ) : null}
