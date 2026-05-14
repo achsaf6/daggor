@@ -40,8 +40,8 @@ const battlemapState = {
 // Schema capability flags (set during initial load; also used for best-effort fallbacks)
 let supportsBattlemapImages = false;
 let supportsBattlemapActiveImageId = true; // optimistic; will be disabled if column missing
-let supportsBattlemapCoverImageId = false;
 let supportsBattlemapSpawnArea = true; // optimistic; disabled if migration 008 not applied
+let supportsBattlemapFog = true; // optimistic; disabled if migration 009 not applied
 
 // supabase-js resolves with `{ data, error }` instead of rejecting on DB errors,
 // so background persistence used to swallow failures silently. This wrapper
@@ -188,9 +188,8 @@ const pickSpawnPositions = (spawnArea, count) => {
   return positions;
 };
 
-// Fog of war "reveal" shape: a rectangle (in image-relative %) that the DM
-// drew to expose part of the map. Fog is the inverse — the renderer covers
-// everything except the union of these shapes.
+// Fog of war shape: a rectangle (in image-relative %) the DM places on the map.
+// FogOfWar renders these as opaque overlays the players can't see through.
 const sanitizeFogShape = (input) => {
   if (!input || typeof input !== 'object') return null;
   const x = sanitizePositionComponent(input.x);
@@ -207,49 +206,11 @@ const sanitizeFogShape = (input) => {
   };
 };
 
-const sanitizeCover = (input) => {
-  const width = clampValue(typeof input.width === 'number' ? input.width : 0, 0, 100);
-  const height = clampValue(typeof input.height === 'number' ? input.height : 0, 0, 100);
-  const maxX = 100 - width;
-  const maxY = 100 - height;
-
-  return {
-    id: input.id,
-    width,
-    height,
-    x: clampValue(typeof input.x === 'number' ? input.x : 0, 0, maxX),
-    y: clampValue(typeof input.y === 'number' ? input.y : 0, 0, maxY),
-    color: sanitizeHexColor(input.color),
-  };
-};
-
-const generateCoverId = () => randomUUID();
-
 const serializeBattlemapSummary = (battlemap) => ({
   id: battlemap.id,
   name: battlemap.name,
   mapPath: battlemap.mapPath,
 });
-
-const getBattlemapCoversForActiveImage = (battlemap) => {
-  const coversMap = battlemap?.covers instanceof Map ? battlemap.covers : new Map();
-
-  // Migrated schema: we store covers with a private _imageId marker and only expose the active image covers.
-  if (supportsBattlemapCoverImageId && battlemap?.activeImageId) {
-    const result = [];
-    for (const value of coversMap.values()) {
-      if (value && (value._imageId === battlemap.activeImageId || !value._imageId)) {
-        // Strip internal marker before sending to clients
-        const { _imageId, ...rest } = value;
-        result.push(rest);
-      }
-    }
-    return result;
-  }
-
-  // Legacy schema: covers are battlemap-wide
-  return Array.from(coversMap.values());
-};
 
 const getFogShapesForActiveImage = (battlemap) => {
   if (!battlemap?.fogByImage || !battlemap?.activeImageId) return [];
@@ -395,28 +356,22 @@ const loadBattlemapStateFromSupabase = async () => {
     imageRows = imagesResult.data ?? [];
   }
 
-  // Attempt to load covers with floor scope. If the new column doesn't exist yet, fall back to legacy covers-per-battlemap.
-  let coverRows = null;
-  supportsBattlemapCoverImageId = true;
-  const coversResult = await supabase
-    .from('battlemap_covers')
-    .select('id, battlemap_id, battlemap_image_id, x, y, width, height, color');
-  if (coversResult.error) {
-    const message = typeof coversResult.error?.message === 'string' ? coversResult.error.message : '';
-    if (message.includes('battlemap_image_id')) {
-      supportsBattlemapCoverImageId = false;
-      const legacyCovers = await supabase
-        .from('battlemap_covers')
-        .select('id, battlemap_id, x, y, width, height, color');
-      if (legacyCovers.error) {
-        throw legacyCovers.error;
-      }
-      coverRows = legacyCovers.data ?? [];
+  // Load persisted fog shapes (migration 009). If the table doesn't exist yet,
+  // skip and fall back to in-memory-only fog for this process.
+  let fogRows = null;
+  const fogResult = await supabase
+    .from('battlemap_fog')
+    .select('id, battlemap_id, battlemap_image_id, x, y, width, height');
+  if (fogResult.error) {
+    const message = typeof fogResult.error?.message === 'string' ? fogResult.error.message : '';
+    if (message.includes('battlemap_fog')) {
+      supportsBattlemapFog = false;
+      logEvent('battlemap_fog table missing — fog will not persist this session');
     } else {
-      throw coversResult.error;
+      throw fogResult.error;
     }
   } else {
-    coverRows = coversResult.data ?? [];
+    fogRows = fogResult.data ?? [];
   }
 
   battlemapState.order = [];
@@ -437,7 +392,7 @@ const loadBattlemapStateFromSupabase = async () => {
         typeof row.grid_offset_y === 'number' ? row.grid_offset_y : DEFAULT_SETTINGS.gridOffsetY,
       gridData: sanitizeGridData(row.grid_data),
       spawnArea: sanitizeSpawnArea(row.spawn_area),
-      covers: new Map(),
+      fogByImage: {},
     });
   }
 
@@ -477,32 +432,29 @@ const loadBattlemapStateFromSupabase = async () => {
     }
   }
 
-  // Attach covers (scoped to an image when available)
-  for (const cover of coverRows || []) {
-    const parent = battlemapState.maps.get(cover.battlemap_id);
-    if (!parent) continue;
-
-    // If cover has an image id, but the parent has no images loaded (shouldn't happen in migrated schema),
-    // fall back to battlemap-level covers.
-    if (supportsBattlemapCoverImageId && cover.battlemap_image_id) {
-      if (!parent.images || parent.images.length === 0) {
-        parent.covers.set(cover.id, sanitizeCover({ ...cover, id: cover.id }));
-        continue;
-      }
-
-      // Only store covers for active image in-memory? We keep all covers but filter on serialize.
-      // Store as a composite key in-memory to avoid collisions across floors.
-      const compositeId = `${cover.battlemap_image_id}:${cover.id}`;
-      parent.covers.set(compositeId, { ...sanitizeCover({ ...cover, id: cover.id }), _imageId: cover.battlemap_image_id });
-      continue;
+  // Attach fog shapes, keyed by image id.
+  let loadedFogCount = 0;
+  for (const fogRow of fogRows || []) {
+    const parent = battlemapState.maps.get(fogRow.battlemap_id);
+    if (!parent || !fogRow.battlemap_image_id) continue;
+    const shape = sanitizeFogShape({
+      id: fogRow.id,
+      x: fogRow.x,
+      y: fogRow.y,
+      width: fogRow.width,
+      height: fogRow.height,
+    });
+    if (!shape) continue;
+    if (!Array.isArray(parent.fogByImage[fogRow.battlemap_image_id])) {
+      parent.fogByImage[fogRow.battlemap_image_id] = [];
     }
-
-    parent.covers.set(cover.id, sanitizeCover({ ...cover, id: cover.id }));
+    parent.fogByImage[fogRow.battlemap_image_id].push(shape);
+    loadedFogCount++;
   }
 
   logEvent(
     `Loaded ${battlemapState.order.length} battlemaps`,
-    `(${coverRows?.length ?? 0} covers)`
+    `(${loadedFogCount} fog shapes)`
   );
 
   battlemapState.activeBattlemapId =
@@ -586,7 +538,7 @@ app.prepare().then(async () => {
     io.emit('battlemap:active', { battlemapId: battlemapState.activeBattlemapId });
   };
 
-  // Per-battlemap broadcast helper. Token moves, cover edits, presence — anything
+  // Per-battlemap broadcast helper. Token moves, fog edits, presence — anything
   // that only matters to clients viewing the same map — should fan out via this
   // helper instead of io.emit so we can scope to the room. Keeps `battlemap:list`
   // and friends on io.emit since every client needs them regardless of room.
@@ -925,30 +877,31 @@ app.prepare().then(async () => {
     throwIfSupabaseError(await supabase.from('battlemaps').delete().eq('id', battlemapId));
   };
 
-  const deleteCoversForBattlemap = async (battlemapId) => {
+  const upsertFogRow = async (battlemapId, battlemapImageId, shape) => {
+    if (!supportsBattlemapFog) return;
     throwIfSupabaseError(
-      await supabase.from('battlemap_covers').delete().eq('battlemap_id', battlemapId)
+      await supabase.from('battlemap_fog').upsert({
+        id: shape.id,
+        battlemap_id: battlemapId,
+        battlemap_image_id: battlemapImageId,
+        x: shape.x,
+        y: shape.y,
+        width: shape.width,
+        height: shape.height,
+      })
     );
   };
 
-  const upsertCoverRow = async (battlemapId, cover, battlemapImageId = null) => {
-    const row = {
-      id: cover.id,
-      battlemap_id: battlemapId,
-      x: cover.x,
-      y: cover.y,
-      width: cover.width,
-      height: cover.height,
-      color: cover.color,
-    };
-    if (supportsBattlemapCoverImageId) {
-      row.battlemap_image_id = battlemapImageId;
-    }
-    throwIfSupabaseError(await supabase.from('battlemap_covers').upsert(row));
+  const deleteFogRow = async (shapeId) => {
+    if (!supportsBattlemapFog) return;
+    throwIfSupabaseError(await supabase.from('battlemap_fog').delete().eq('id', shapeId));
   };
 
-  const deleteCoverRow = async (coverId) => {
-    throwIfSupabaseError(await supabase.from('battlemap_covers').delete().eq('id', coverId));
+  const deleteFogRowsForImage = async (battlemapImageId) => {
+    if (!supportsBattlemapFog) return;
+    throwIfSupabaseError(
+      await supabase.from('battlemap_fog').delete().eq('battlemap_image_id', battlemapImageId)
+    );
   };
 
   const insertBattlemapImageRow = async (image) => {
@@ -1008,32 +961,34 @@ app.prepare().then(async () => {
     });
   };
 
-  const findCoverEntry = (battlemap, coverId, imageId = null) => {
-    const coversMap = battlemap?.covers instanceof Map ? battlemap.covers : null;
-    if (!coversMap || !coverId) {
-      return null;
-    }
+  // Per-shape debounced writes for fog:update-area. Drag events fire on every
+  // cursor frame, so we wait FOG_UPDATE_DEBOUNCE_MS after the last edit before
+  // hitting Supabase. add/remove/clear write through immediately.
+  const FOG_UPDATE_DEBOUNCE_MS = 5000;
+  const fogUpdateTimers = new Map(); // shapeId -> { timer, battlemapId, imageId }
 
-    if (supportsBattlemapCoverImageId) {
-      const effectiveImageId = imageId ?? battlemap?.activeImageId ?? null;
-      if (effectiveImageId) {
-        const key = `${effectiveImageId}:${coverId}`;
-        const existing = coversMap.get(key);
-        if (existing) {
-          return { key, existing, imageId: effectiveImageId };
-        }
-        // Fallback scan
-        for (const [k, value] of coversMap.entries()) {
-          if (value?.id === coverId && value?._imageId === effectiveImageId) {
-            return { key: k, existing: value, imageId: effectiveImageId };
-          }
-        }
-      }
-      return null;
-    }
+  const cancelFogUpdateWrite = (shapeId) => {
+    const entry = fogUpdateTimers.get(shapeId);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    fogUpdateTimers.delete(shapeId);
+  };
 
-    const existing = coversMap.get(coverId);
-    return existing ? { key: coverId, existing, imageId: null } : null;
+  const scheduleFogUpdateWrite = (battlemapId, imageId, shapeId) => {
+    if (!supportsBattlemapFog) return;
+    cancelFogUpdateWrite(shapeId);
+    const timer = setTimeout(() => {
+      fogUpdateTimers.delete(shapeId);
+      runBackgroundTask('persist fog update', async () => {
+        const bm = battlemapState.maps.get(battlemapId);
+        const arr = bm?.fogByImage?.[imageId];
+        if (!Array.isArray(arr)) return;
+        const shape = arr.find((s) => s.id === shapeId);
+        if (!shape) return; // got removed or cleared while waiting
+        await upsertFogRow(battlemapId, imageId, shape);
+      });
+    }, FOG_UPDATE_DEBOUNCE_MS);
+    fogUpdateTimers.set(shapeId, { timer, battlemapId, imageId });
   };
 
   // Store display mode users separately (they're not in the users Map)
@@ -1383,7 +1338,7 @@ app.prepare().then(async () => {
         gridOffsetX: DEFAULT_SETTINGS.gridOffsetX,
         gridOffsetY: DEFAULT_SETTINGS.gridOffsetY,
         gridData: cloneGridData(),
-        covers: new Map(),
+        fogByImage: {},
       };
 
       const newSortIndex = battlemapState.order.length;
@@ -1583,22 +1538,19 @@ app.prepare().then(async () => {
 
       battlemap.images = remaining;
 
-      // Remove any in-memory covers for this image
-      if (supportsBattlemapCoverImageId && battlemap.covers instanceof Map) {
-        for (const [key, value] of battlemap.covers.entries()) {
-          if (value?._imageId === imageId) {
-            battlemap.covers.delete(key);
-          }
-        }
-      }
-
       // Cascade fog cleanup. fogByImage is keyed by floor id; without this
       // the array leaks for the lifetime of the process every time a floor
       // is deleted, and a floor that re-uses the id (it shouldn't, but…)
-      // would inherit stale shapes.
+      // would inherit stale shapes. The Supabase FK has ON DELETE CASCADE, so
+      // dropping the image row will wipe the rows there too — but we trigger
+      // an explicit delete below in case the row write fails or is delayed.
+      let cascadedFogIds = [];
       if (battlemap.fogByImage && imageId in battlemap.fogByImage) {
+        const arr = battlemap.fogByImage[imageId];
+        if (Array.isArray(arr)) cascadedFogIds = arr.map((s) => s.id);
         delete battlemap.fogByImage[imageId];
       }
+      for (const fogId of cascadedFogIds) cancelFogUpdateWrite(fogId);
 
       if (battlemap.activeImageId === imageId) {
         battlemap.activeImageId = remaining[0]?.id ?? null;
@@ -1831,6 +1783,10 @@ app.prepare().then(async () => {
       bucket.push(shape);
       respond(ack, { ok: true });
       emitBattlemapUpdate(battlemap.id);
+      const imageId = battlemap.activeImageId;
+      if (imageId) {
+        runBackgroundTask('insert fog shape', () => upsertFogRow(battlemap.id, imageId, shape));
+      }
     });
 
     socket.on('fog:remove-area', (payload, ack) => {
@@ -1842,12 +1798,20 @@ app.prepare().then(async () => {
       }
       const bucket = ensureFogBucket(battlemap);
       const id = typeof payload?.id === 'string' ? payload.id : '';
+      let removed = false;
       if (bucket && id) {
         const idx = bucket.findIndex((s) => s.id === id);
-        if (idx >= 0) bucket.splice(idx, 1);
+        if (idx >= 0) {
+          bucket.splice(idx, 1);
+          removed = true;
+        }
       }
       respond(ack, { ok: true });
       emitBattlemapUpdate(battlemap.id);
+      if (removed) {
+        cancelFogUpdateWrite(id);
+        runBackgroundTask('delete fog shape', () => deleteFogRow(id));
+      }
     });
 
     socket.on('fog:update-area', (payload, ack) => {
@@ -1860,17 +1824,25 @@ app.prepare().then(async () => {
       const bucket = ensureFogBucket(battlemap);
       const id = typeof payload?.id === 'string' ? payload.id : '';
       const updates = (payload?.updates && typeof payload.updates === 'object') ? payload.updates : null;
+      let didUpdate = false;
       if (bucket && id && updates) {
         const idx = bucket.findIndex((s) => s.id === id);
         if (idx >= 0) {
           // sanitizeFogShape clamps and validates; we feed it the merged
           // result so it ignores any malformed fields the client sent.
           const sanitized = sanitizeFogShape({ ...bucket[idx], ...updates, id });
-          if (sanitized) bucket[idx] = sanitized;
+          if (sanitized) {
+            bucket[idx] = sanitized;
+            didUpdate = true;
+          }
         }
       }
       respond(ack, { ok: true });
       emitBattlemapUpdate(battlemap.id);
+      const imageId = battlemap.activeImageId;
+      if (didUpdate && imageId) {
+        scheduleFogUpdateWrite(battlemap.id, imageId, id);
+      }
     });
 
     socket.on('fog:clear', (payload, ack) => {
@@ -1881,9 +1853,15 @@ app.prepare().then(async () => {
         return;
       }
       const bucket = ensureFogBucket(battlemap);
+      const clearedIds = bucket ? bucket.map((s) => s.id) : [];
       if (bucket) bucket.length = 0;
       respond(ack, { ok: true });
       emitBattlemapUpdate(battlemap.id);
+      const imageId = battlemap.activeImageId;
+      if (clearedIds.length > 0 && imageId) {
+        for (const id of clearedIds) cancelFogUpdateWrite(id);
+        runBackgroundTask('clear fog shapes', () => deleteFogRowsForImage(imageId));
+      }
     });
 
     // ---------------- Soundboard ----------------
@@ -2084,10 +2062,9 @@ app.prepare().then(async () => {
       emitBattlemapDeleted(battlemap.id);
       runBackgroundTask('persist battlemap order', () => persistBattlemapOrder(battlemapState.order));
 
-      runBackgroundTask('delete battlemap', async () => {
-        await deleteCoversForBattlemap(battlemap.id);
-        await deleteBattlemapRow(battlemap.id);
-      });
+      // FK on battlemap_fog cascades when the battlemap row is deleted; no
+      // separate fog cleanup needed.
+      runBackgroundTask('delete battlemap', () => deleteBattlemapRow(battlemap.id));
 
       if (battlemapState.activeBattlemapId === battlemap.id) {
         const previousId = battlemap.id;
@@ -2100,9 +2077,6 @@ app.prepare().then(async () => {
       }
     });
 
-    // The cover system was removed; fog-of-war is the canonical
-    // "rectangle on the map" feature now. See fog:add-area /
-    // fog:remove-area / fog:update-area / fog:clear above.
 
     // Handle position updates
     socket.on('position-update', (data) => {
@@ -2371,10 +2345,6 @@ app.prepare().then(async () => {
       mutateActiveInitiative((bm) => ensureInitiativeMember(bm, persistentTokenId, sanitizedName));
     });
 
-    // Legacy global cover handlers (add-cover/remove-cover/update-cover) were
-    // removed in favour of the battlemap-scoped variants
-    // (battlemap:add-cover/update-cover/remove-cover) which persist to Supabase
-    // and respect floor (battlemap_image) scoping.
   });
 
   httpServer

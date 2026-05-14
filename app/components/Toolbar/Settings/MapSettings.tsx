@@ -5,6 +5,7 @@ import { Wand2 } from "lucide-react";
 import { GridSizeSlider } from "./GridSizeSlider";
 import { GridOffsetJoystick } from "./GridOffsetJoystick";
 import { HorizontalSquaresInput } from "./SquaresInput";
+import { GridDetectorModal } from "./GridDetectorModal";
 import { useBattlemap } from "../../../providers/BattlemapProvider";
 import { GridData } from "../../../utils/gridData";
 
@@ -30,31 +31,10 @@ export const MapSettings = ({
     isMutating,
     isBattlemapLoading,
     deleteBattlemap,
-    detectAndApplyGrid,
   } = useBattlemap();
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [detectionMessage, setDetectionMessage] = useState<string | null>(null);
-  const [isDetecting, setIsDetecting] = useState(false);
-
-  const handleDetectGrid = async () => {
-    setIsDetecting(true);
-    setDetectionMessage(null);
-    const result = await detectAndApplyGrid();
-    if (result.ok) {
-      setDetectionMessage(
-        `Detected grid: ${result.spacing.x}×${result.spacing.y}px`
-      );
-    } else if (result.reason === "no-image") {
-      setDetectionMessage("No active map image to scan");
-    } else if (result.reason === "low-confidence") {
-      setDetectionMessage("Couldn't detect a grid");
-    } else {
-      setDetectionMessage("Detection failed");
-    }
-    setIsDetecting(false);
-    setTimeout(() => setDetectionMessage(null), 3500);
-  };
+  const [detectorOpen, setDetectorOpen] = useState(false);
 
   const handleDeleteBattlemap = async () => {
     if (!currentBattlemap) {
@@ -62,7 +42,7 @@ export const MapSettings = ({
     }
 
     const confirmed = window.confirm(
-      `Delete "${currentBattlemap.name}" and all of its covers?`
+      `Delete "${currentBattlemap.name}" and all of its floors?`
     );
     if (!confirmed) {
       return;
@@ -83,8 +63,8 @@ export const MapSettings = ({
       <div className="mb-4">
         <button
           type="button"
-          onClick={handleDetectGrid}
-          disabled={disabled || isDetecting}
+          onClick={() => setDetectorOpen(true)}
+          disabled={disabled}
           className="glass-body w-full px-3 py-2 text-sm border flex items-center justify-center gap-2 transition-colors disabled:opacity-50 hover:bg-[var(--glass-highlight)]"
           style={{
             borderColor: "var(--glass-border)",
@@ -92,13 +72,8 @@ export const MapSettings = ({
           }}
         >
           <Wand2 className="h-4 w-4" />
-          {isDetecting ? "Detecting…" : "Detect grid"}
+          Detect grid…
         </button>
-        {detectionMessage ? (
-          <div className="glass-muted text-xs mt-2" style={{ color: "var(--glass-txt-muted)" }}>
-            {detectionMessage}
-          </div>
-        ) : null}
       </div>
 
       <div className="mb-4">
@@ -139,7 +114,8 @@ export const MapSettings = ({
           ) : null}
         </div>
       ) : null}
+
+      <GridDetectorModal open={detectorOpen} onClose={() => setDetectorOpen(false)} />
     </div>
   );
 };
-

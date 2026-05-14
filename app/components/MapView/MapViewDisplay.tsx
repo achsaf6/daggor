@@ -124,7 +124,7 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
 
   // Drawing tools — shared rectangle-drawing primitives used by spawn-area
-  // and fog tools. Cover tool was removed; fog took over its role.
+  // and fog tools.
   const [isSpawnToolActive, setIsSpawnToolActive] = useState(false);
   const [isFogToolActive, setIsFogToolActive] = useState(false);
   const [isDrawingSquare, setIsDrawingSquare] = useState(false);
@@ -312,6 +312,35 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
     }
   };
 
+  // Right-click anywhere on a fog shape removes it, regardless of which tool
+  // is active. We hit-test in image-relative space so it works through pan/zoom.
+  // Per-shape contextmenu handlers in <FogManager/> stop propagation, so this
+  // only fires when the fog tool is OFF (FogManager unmounted) or when the
+  // right-click misses the manager's drag layer. Token contextmenu handlers
+  // also stop propagation, so right-clicking a token still opens its own menu.
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (!coordinateMapper.isReady || fogShapes.length === 0) return;
+    const point = coordinateMapper.screenToImageRelative({
+      x: e.clientX,
+      y: e.clientY,
+    });
+    if (!point) return;
+    for (let i = fogShapes.length - 1; i >= 0; i -= 1) {
+      const s = fogShapes[i];
+      if (
+        point.x >= s.x &&
+        point.x <= s.x + s.width &&
+        point.y >= s.y &&
+        point.y <= s.y + s.height
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        void removeFogArea(s.id);
+        return;
+      }
+    }
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
@@ -378,6 +407,7 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onMouseDown={handleMouseDown}
+      onContextMenu={handleContextMenu}
       data-testid="map-canvas"
     >
       {showToolbar && (
@@ -527,7 +557,7 @@ export const MapViewDisplay = ({ onReadyChange }: MapViewDisplayProps) => {
           />
         );
       })()}
-      {/* Preview square while drawing (covers in blue, spawn area in green) */}
+      {/* Preview square while drawing (fog in blue, spawn area in green) */}
       {isDrawingSquare && squareStartPos && squareCurrentPos && imageBounds && coordinateMapper.isReady && (
         (() => {
           const startScreen = coordinateMapper.imageRelativeToScreen(squareStartPos);

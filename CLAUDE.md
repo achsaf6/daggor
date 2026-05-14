@@ -10,7 +10,7 @@ A real-time shared battlemap for tabletop play. Three browser surfaces talk to o
 - **GM dashboard** (`/dashboard`) — full toolbar, the only surface allowed to mutate battlemap structure (create/rename/delete maps, change settings, edit fog, run initiative, spawn NPCs, soundboard).
 - **Display** (`/display`) — read-only projector view. Same component tree as the dashboard but with the toolbar/panels stripped.
 
-Stack: Next.js 16 (App Router) + React 19 + TypeScript (strict) + Tailwind v4 + Socket.IO 4.8 + Supabase. Image grid detection via `sharp`. Drag/drop via `@dnd-kit`, mobile gestures via Hammer.
+Stack: Next.js 16 (App Router) + React 19 + TypeScript (strict) + Tailwind v4 + Socket.IO 4.8 + Supabase. Interactive grid detection runs client-side in canvas (`app/utils/gridDetect.ts` + `GridDetectorModal`). Drag/drop via `@dnd-kit`, mobile gestures via Hammer.
 
 ## The dual-socket pattern (important)
 
@@ -32,7 +32,6 @@ The reason this matters: both sockets share `persistentUserId`. Without a guard,
 | State | Location | Survives restart? |
 |---|---|---|
 | Battlemaps, floors, grid settings, spawn area, map paths | Supabase (`battlemaps`, `battlemap_images`) | yes |
-| Battlemap covers | Supabase (`battlemap_covers`) | yes |
 | Characters | Supabase (`characters`) | yes |
 | Monsters (token templates) | Supabase (`monsters`) | yes |
 | Active battlemap pointer | `battlemapState.activeBattlemapId` (memory) | no — derived from "first map by sort_index" |
@@ -40,12 +39,12 @@ The reason this matters: both sockets share `persistentUserId`. Without a guard,
 | Disconnected users (30-min TTL) | `disconnectedUsers: Map<persistentUserId, userData>` | no |
 | Display/dashboard sockets | `displayModeUsers: Map<socketId, userData>` (separate from `users` so they're invisible to players) | no |
 | Initiative tracker | `battlemap.initiative` (per-battlemap, in-memory) | no |
-| Fog of war | `battlemap.fogByImage[imageId]` (per-floor, in-memory) | no |
+| Fog of war | `battlemap.fogByImage[imageId]` (in-memory) + Supabase (`battlemap_fog`) | yes |
 | Soundboard library | dashboard's `localStorage` | client-side only |
 
 ### Helpers worth knowing
 
-- `broadcastToActive(event, payload)` — emits to every socket in the active battlemap's room (`bm:<id>`). Use for token/cover/fog/presence events.
+- `broadcastToActive(event, payload)` — emits to every socket in the active battlemap's room (`bm:<id>`). Use for token/fog/presence events.
 - `broadcastFromSocketToActive(socket, event, payload)` — same, but excludes the sender. Server.js ~588.
 - `runBackgroundTask(desc, asyncFn)` — fires the task with `setImmediate` and logs failures. Used to push Supabase writes off the request path.
 - `ensureBattlemapMutator(eventName, ack)` — gates handlers that mutate battlemap structure to dashboard sockets only. Server.js ~1050.
@@ -72,7 +71,7 @@ Three rules everything else follows from:
 
 - **Token move (player):** `MapViewMobile` → `usePosition` → `useSocket.updateMyPosition` → server `position-update` (server.js ~2080) → ownership check → `broadcastToActive('user-moved')` → all observers' `useSocket` → `setOtherUsers`.
 - **Battlemap switch (DM):** `BattlemapManager.selectBattlemap` → `BattlemapProvider.selectBattlemap` (`set-active` emit) → server `battlemap:set-active` (~1590) → `resetTokensForActiveBattlemap` (~729): broadcasts `token-removed` for everyone, clears `users` + `disconnectedUsers`, wipes new map's initiative, reseats every connected presence socket into the spawn area, broadcasts fresh `user-joined` + `all-users` + `initiative:updated`. Then `moveSocketsToActiveBattlemapRoom` (~829) migrates every socket between rooms.
-- **Fog rectangle add/remove/move/clear:** `FogManager` UI → `BattlemapProvider.addFogArea` etc. → server `fog:*` handlers (~1786) → mutate `battlemap.fogByImage[imageId]` → `emitBattlemapUpdate(id)` → all observers re-render via `BattlemapProvider`'s `battlemap:updated` listener.
+- **Fog rectangle add/remove/move/clear:** `FogManager` UI → `BattlemapProvider.addFogArea` etc. → server `fog:*` handlers → mutate `battlemap.fogByImage[imageId]` → `emitBattlemapUpdate(id)` → all observers re-render via `BattlemapProvider`'s `battlemap:updated` listener. Persistence: `add`/`remove`/`clear` write through to `battlemap_fog` immediately via `runBackgroundTask`; `update-area` is per-shape debounced 5s (drag events fire every cursor frame). FK cascades wipe rows when a floor or battlemap is deleted.
 - **Initiative auto-population:** triggered by player join (`initializeUser` ~1240), NPC spawn (`add-token` ~2295), name update (`user-name-update` ~2235), battlemap switch (reseat loop ~813). Removal triggered by disconnect (~2225) or `remove-token` (~2280). Drag-reorder via dashboard's `InitiativePanel` → `initiative:reorder` (~1953). Order is DM-authoritative; the server does not sort by score.
 - **Name propagation:** mobile player picks character → `CharacterProvider` sets state → `MapViewMobile` effect calls `useSocket.updateMyName` → server `user-name-update` (~2235) → broadcasts `user-name-updated` to active room → observers patch `otherUsers`/`disconnectedUsers` and dashboard re-renders the players panel. `updateMyName` is `useCallback`'d and gated by `lastSentNameRef` so it does not re-emit on every render — see "Known issues / regression risks" below.
 
@@ -134,7 +133,7 @@ app/
       SidebarToolbar.tsx                  # Grid scale, offset, floor switcher, tools.
       BattlemapManager.tsx                # Map list + CRUD.
       TokenPicker.tsx                     # Color palette + monster templates.
-      Settings/                           # Grid offset joystick, etc.
+      Settings/                           # Grid offset joystick, GridDetectorModal, etc.
   hooks/
     useSocket.ts                          # Presence socket bus.
     useSurface.ts + useFinePointer.ts
@@ -144,16 +143,16 @@ app/
     useInitiative.ts                      # Wraps initiative socket events.
     useSoundboardListener.ts
   api/
-    gridlines/route.ts                    # Sobel edge detection grid inference.
     map-upload/route.ts                   # Supabase storage upload (10 MB cap).
     token-upload/route.ts                 # Supabase storage upload (5 MB cap).
   utils/
     coordinates.ts + grid.ts + gridData.ts
+    gridDetect.ts                         # Client-side Sobel grid detector (used by GridDetectorModal).
     imageBounds.ts + tokenSizes.ts
     supabase.ts                           # Browser supabase client.
   types/index.ts                          # User, TokenTemplate, Position, etc.
 
-migrations/                               # 8 SQL files. 002 + 007 + 008 are the relevant ones.
+migrations/                               # 10 SQL files. 002, 007, 008, 009 (fog), 010 (drop covers) are the relevant ones.
 tests/e2e/                                # Playwright. fixtures/ has surface fixtures + socket helpers.
 public/maps/                              # Default battlemap fallback lives here.
 lib/                                      # supabaseServer, defaultBattlemap.
@@ -215,8 +214,9 @@ Items I or the audit pass have flagged. Severity is user-visible impact × likel
 - ~~No error boundary~~ — `app/components/ErrorBoundary.tsx` wraps every surface in `SurfaceShell`; uncaught render errors now show a "The realm collapsed" panel with try-again / reload instead of leaving a frozen LoadingScreen.
 - ~~`CharacterProvider.updateCharacter` stale closure~~ — now reads the target character from `characterRef` at call time and skips the success-branch `setCharacter` if the user has switched characters during the round-trip.
 - ~~`BattlemapProvider` settings-debounce has no in-flight-emit cleanup~~ — added `isMountedRef`; the scheduled emit and its `.catch`/`.finally` all bail if the provider has unmounted.
-- ~~`battlemap:delete-image` doesn't cascade fog shapes~~ — server now deletes `battlemap.fogByImage[imageId]` alongside the cover cleanup.
-- ~~Fog/cover IDs use `Date.now() + Math.random()`~~ — both now use `crypto.randomUUID()`.
+- ~~`battlemap:delete-image` doesn't cascade fog shapes~~ — server now deletes `battlemap.fogByImage[imageId]` on delete-image; Supabase FK on `battlemap_fog.battlemap_image_id` cascades the rows too.
+- ~~Fog IDs use `Date.now() + Math.random()`~~ — now use `crypto.randomUUID()`.
+- ~~Fog is not persisted (regression from the old `battlemap_covers` feature)~~ — fog now writes through to `battlemap_fog` (migration 009) with a 5s debounce on `update-area`. The dormant `battlemap_covers` table was dropped in migration 010.
 - ~~`TokenManager.handleTokenContextMenu` is not memoized~~ — wrapped in `useCallback`. (Note: the inline `(e) => handleTokenContextMenu(e, persistentUserId)` at the call site still creates a new arrow per token per render; if `DraggableToken` is later wrapped in `React.memo`, that closure should be stabilized too.)
 - ~~`prefetchImage` in `BattlemapProvider` has no `onerror`~~ — failures now log via `debugLog` and stay in the dedupe set so we don't spin retrying a broken URL.
 - ~~`BattlemapProvider` `debugLog` always on~~ — now elided in production builds (`process.env.NODE_ENV === "production"`).

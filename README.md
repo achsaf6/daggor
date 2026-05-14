@@ -66,7 +66,7 @@ export const MapView = () => {
 
 - **Next.js App Router + Tailwind CSS v4** render the UI, with fonts configured in `app/layout.tsx`.
 - **Custom Node HTTP + Socket.IO server (`server.js`)** wraps `next`’s request handler so realtime traffic and SSR share the same port/hostname. Tokens and covers are tracked in-memory for low latency; Supabase persists long-lived map metadata/grid defaults.
-- **Supabase** provides Postgres tables (`map_settings`, `battlemaps`, `battlemap_covers`) and object storage for uploaded map images.
+- **Supabase** provides Postgres tables (`map_settings`, `battlemaps`, `battlemap_images`, `battlemap_fog`, `characters`, `monsters`) and object storage for uploaded map images.
 
 ```1:52:server.js
 import 'dotenv/config';
@@ -396,7 +396,7 @@ See `server.js` and `app/hooks/useSocket.ts` in the previous snippets for the ca
 
 - **Supabase tables**
   - `map_settings`: single-record table storing the live grid scale + offsets that every client subscribes to.
-  - `battlemaps` + `battlemap_covers`: canonical list of map assets, metadata, and persisted cover rectangles.
+  - `battlemaps` + `battlemap_images` + `battlemap_fog`: canonical list of map assets, per-floor images, and persisted fog-of-war shapes.
   - All tables enable Row-Level Security (currently permissive) and timestamp triggers in `migrations/001_*.sql` and `002_*.sql`.
 
 ```4:56:migrations/002_create_battlemaps.sql
@@ -417,14 +417,14 @@ CREATE TABLE IF NOT EXISTS battlemaps (
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS battlemap_covers (
+CREATE TABLE IF NOT EXISTS battlemap_fog (
   id TEXT PRIMARY KEY,
   battlemap_id UUID NOT NULL REFERENCES battlemaps(id) ON DELETE CASCADE,
+  battlemap_image_id UUID NOT NULL REFERENCES battlemap_images(id) ON DELETE CASCADE,
   x DOUBLE PRECISION NOT NULL DEFAULT 0,
   y DOUBLE PRECISION NOT NULL DEFAULT 0,
   width DOUBLE PRECISION NOT NULL DEFAULT 0,
   height DOUBLE PRECISION NOT NULL DEFAULT 0,
-  color TEXT NOT NULL DEFAULT '#808080',
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );

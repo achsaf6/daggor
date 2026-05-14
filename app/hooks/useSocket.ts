@@ -40,9 +40,6 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
   const persistentUserIdRef = useRef<string | null>(null);
   const myUserIdRef = useRef<string | null>(null);
 
-  // Legacy normalizeCover/generateCoverId removed — covers live exclusively
-  // under currentBattlemap (BattlemapProvider) now.
-
   // Get or create persistent user ID from localStorage
   useEffect(() => {
     const getPersistentUserId = (): string => {
@@ -495,10 +492,6 @@ export const useSocket = (surface: Surface = "mobile"): UseSocketReturn => {
         });
       }
     );
-
-    // Legacy cover events (all-covers/cover-added/cover-removed/cover-updated)
-    // and their server handlers were removed. Battlemap-scoped covers come
-    // through `battlemap:updated` and live on currentBattlemap.covers.
 
     // Cleanup on unmount
     return () => {

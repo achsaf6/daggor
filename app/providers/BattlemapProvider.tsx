@@ -90,7 +90,7 @@ interface BattlemapContextValue {
   renameBattlemapImage: (imageId: string, name: string) => Promise<void>;
   deleteBattlemapImage: (imageId: string) => Promise<void>;
   updateBattlemapSettings: (updates: Partial<BattlemapSettings>) => void;
-  detectAndApplyGrid: () => Promise<DetectGridResult>;
+  applyDetectedGrid: (gridData: GridData) => Promise<void>;
   createBattlemap: (input: CreateBattlemapInput) => Promise<BattlemapSummary | null>;
   syncBattlemapFromServer: (battlemapId: string | null) => void;
   deleteBattlemap: (battlemapId: string) => Promise<void>;
@@ -102,10 +102,6 @@ interface BattlemapContextValue {
   clearFog: () => Promise<void>;
   canManageBattlemaps: boolean;
 }
-
-export type DetectGridResult =
-  | { ok: true; spacing: { x: number; y: number }; confidence: number }
-  | { ok: false; reason: "no-image" | "low-confidence" | "request-failed" };
 
 interface BattlemapPayload {
   id: string;
@@ -739,77 +735,69 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
     [currentBattlemapId, clearDebounceTimer, emitWithAck]
   );
 
-  const detectAndApplyGrid = useCallback(async (): Promise<DetectGridResult> => {
-    if (!currentBattlemapId || !currentBattlemap) {
-      return { ok: false, reason: "no-image" };
-    }
-    const activeImage = currentBattlemap.images.find(
-      (img) => img.id === currentBattlemap.activeImageId
-    );
-    const path = activeImage?.mapPath || currentBattlemap.mapPath;
-    if (!path) {
-      return { ok: false, reason: "no-image" };
-    }
+  const applyDetectedGrid = useCallback(
+    async (gridData: GridData): Promise<void> => {
+      if (!currentBattlemapId) return;
 
-    let detected: {
-      verticalLines: number[];
-      horizontalLines: number[];
-      imageWidth: number;
-      imageHeight: number;
-      confidence: number;
-      spacing: { x: number; y: number };
-    } | null = null;
-    try {
-      const res = await fetch(`/api/gridlines?path=${encodeURIComponent(path)}`);
-      if (!res.ok) return { ok: false, reason: "request-failed" };
-      detected = await res.json();
-    } catch {
-      return { ok: false, reason: "request-failed" };
-    }
-    if (
-      !detected ||
-      detected.verticalLines.length === 0 ||
-      detected.horizontalLines.length === 0
-    ) {
-      return { ok: false, reason: "low-confidence" };
-    }
-
-    // Replace gridData with detected lines, then reset scale/offset multipliers
-    // so the rendered grid matches the printed grid 1:1.
-    try {
       await emitWithAck("battlemap:update-grid-data", {
         battlemapId: currentBattlemapId,
         gridData: {
-          verticalLines: detected.verticalLines,
-          horizontalLines: detected.horizontalLines,
-          imageWidth: detected.imageWidth,
-          imageHeight: detected.imageHeight,
+          verticalLines: gridData.verticalLines,
+          horizontalLines: gridData.horizontalLines,
+          imageWidth: gridData.imageWidth,
+          imageHeight: gridData.imageHeight,
         },
       });
-    } catch (err) {
-      console.error("Failed to apply detected grid", err);
-      return { ok: false, reason: "request-failed" };
-    }
 
-    // updateBattlemapSettings is debounced; emit directly so the reset lands
-    // before the user has a chance to nudge anything.
-    clearDebounceTimer();
-    setCurrentBattlemap((prev) =>
-      prev ? { ...prev, gridScale: 1, gridOffsetX: 0, gridOffsetY: 0 } : prev
-    );
-    try {
-      await emitWithAck("battlemap:update-settings", {
-        battlemapId: currentBattlemapId,
-        gridScale: 1,
-        gridOffsetX: 0,
-        gridOffsetY: 0,
-      });
-    } catch (err) {
-      console.error("Failed to reset grid settings after detection", err);
-    }
+      // computeGridLines rebuilds lines from imageWidth/2 + k*spacing + gridOffset.
+      // It only consumes the *spacing* from gridData and discards the detected
+      // phase, so we have to convert the detector's absolute line positions into
+      // an offset relative to the image center. Without this the rendered grid
+      // has the right pitch but the wrong phase.
+      const avgSpacing = (lines: number[]): number => {
+        if (lines.length < 2) return 0;
+        const sorted = [...lines].sort((a, b) => a - b);
+        let sum = 0;
+        for (let i = 1; i < sorted.length; i++) sum += sorted[i] - sorted[i - 1];
+        return sum / (sorted.length - 1);
+      };
+      const phaseOffset = (firstLine: number, anchor: number, spacing: number): number => {
+        if (!(spacing > 0)) return 0;
+        const wrapped = (((firstLine - anchor) % spacing) + spacing) % spacing;
+        return wrapped > spacing / 2 ? wrapped - spacing : wrapped;
+      };
+      const spacingX = avgSpacing(gridData.verticalLines);
+      const spacingY = avgSpacing(gridData.horizontalLines);
+      const offsetX = phaseOffset(
+        gridData.verticalLines[0] ?? 0,
+        gridData.imageWidth / 2,
+        spacingX
+      );
+      const offsetY = phaseOffset(
+        gridData.horizontalLines[0] ?? 0,
+        gridData.imageHeight / 2,
+        spacingY
+      );
 
-    return { ok: true, spacing: detected.spacing, confidence: detected.confidence };
-  }, [currentBattlemapId, currentBattlemap, emitWithAck, clearDebounceTimer]);
+      // updateBattlemapSettings is debounced; emit directly so the reset lands
+      // before the user has a chance to nudge anything.
+      clearDebounceTimer();
+      setCurrentBattlemap((prev) =>
+        prev ? { ...prev, gridScale: 1, gridOffsetX: offsetX, gridOffsetY: offsetY } : prev
+      );
+      try {
+        await emitWithAck("battlemap:update-settings", {
+          battlemapId: currentBattlemapId,
+          gridScale: 1,
+          gridOffsetX: offsetX,
+          gridOffsetY: offsetY,
+        });
+      } catch (err) {
+        console.error("Failed to reset grid settings after detection", err);
+      }
+    },
+    [currentBattlemapId, emitWithAck, clearDebounceTimer]
+  );
 
   const addFogArea = useCallback(
     async (shape: Omit<FogShape, "id">) => {
@@ -973,7 +961,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       renameBattlemapImage,
       deleteBattlemapImage,
       updateBattlemapSettings,
-      detectAndApplyGrid,
+      applyDetectedGrid,
       createBattlemap,
       syncBattlemapFromServer,
       deleteBattlemap,
@@ -1013,7 +1001,7 @@ export const BattlemapProvider = ({ children }: { children: React.ReactNode }) =
       updateFogArea,
       clearFog,
       allowBattlemapMutations,
-      detectAndApplyGrid,
+      applyDetectedGrid,
     ]
   );
 

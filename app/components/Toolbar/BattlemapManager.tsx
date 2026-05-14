@@ -223,7 +223,7 @@ export const BattlemapManager = ({ onClose }: BattlemapManagerProps) => {
       return;
     }
     const active = floors.find((floor) => floor.id === activeFloorId);
-    const confirmed = window.confirm(`Delete floor "${active?.name ?? "Floor"}" and all of its covers?`);
+    const confirmed = window.confirm(`Delete floor "${active?.name ?? "Floor"}" and all of its fog?`);
     if (!confirmed) {
       return;
     }
